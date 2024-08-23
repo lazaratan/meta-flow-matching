@@ -1,0 +1,11 @@
+# @package _global_
+datamodule:
+  _target_: src.datamodule.letters_dataloader.LettersBatchDatamodule
+  batch_size: 1 
+  ivp_batch_size: 256
+  noise_scale: 0.05
+  source_noise_scale: 0.5
+  num_rotations: 10
+  conditional: False
+  seed: 0
+  shuffle: True

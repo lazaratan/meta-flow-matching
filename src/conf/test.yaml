@@ -1,0 +1,41 @@
+# @package _global_
+
+# specify here default evaluation configuration
+defaults:
+  - _self_
+  - datamodule: letters_dataloader.yaml
+  - model: letters_mlp_fm.yaml
+  - callbacks: null
+  - logger: many_loggers.yaml 
+  - trainer: default.yaml
+  - log_dir: evaluation.yaml
+  - launcher: vector_cluster.yaml
+
+  - experiment: null
+
+  # enable color logging
+  - override hydra/hydra_logging: colorlog
+  - override hydra/job_logging: colorlog
+
+original_work_dir: ${hydra:runtime.cwd}
+
+data_dir: ${original_work_dir}/data/
+
+print_config: True
+
+ignore_warnings: True
+
+seed: null
+
+name: "default"
+
+test_mode: "default"
+
+# passing checkpoint path is necessary
+ckpt_path: null
+ckpt: null
+
+# default to old behavior, change working directory to experimental directory
+hydra:
+  job:
+    chdir: True

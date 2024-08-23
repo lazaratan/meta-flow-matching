@@ -1,0 +1,48 @@
+marker:
+  pHH3:
+  RFP:
+  mCHERRY:
+  Vimentin:
+  EpCAM:
+  CK18:
+  Pan_CK:
+  GFP:
+  IdU:
+  pPDK1:
+  cCaspase_3:
+  Geminin:
+  pMEK1_2:
+  pNDRG:
+  pMKK4_SEK1:
+  pBTK:
+  pSRC:
+  p4EBP1:
+  pRB:
+  pAKT308:
+  pCREB:
+  pSMAD1_5_9:
+  pAKT473:
+  pNF_kB:
+  pMKK3_MKK6:
+  pP38:
+  pMAPKAPK:
+  pAMPKa:
+  pBAD:
+  pHistone_H2A:
+  p90RSK:
+  pP120_catenin:
+  Beta_catenin_active:
+  pERK1_2:
+  pGSK:
+  pSMAD2_3:
+  PLK:
+  CHGA:
+  pDNAPK:
+  pS6:
+  CD90:
+  cPARP:
+  pCHK1:
+  Cyclin_B1:
+  # pPKCa: # dropped because nan in all samples??
+
+# ['pHH3', 'RFP', 'mCHERRY', 'Vimentin', 'EpCAM', 'CK18', 'Pan_CK', 'GFP', 'IdU', 'pPDK1', 'cCaspase_3', 'Geminin', 'pMEK1_2', 'pNDRG', 'pMKK4_SEK1', 'pBTK', 'pSRC', 'p4EBP1', 'pRB', 'pAKT308', 'pCREB', 'pSMAD1_5_9', 'pAKT473', 'pNF_kB', 'pMKK3_MKK6', 'pP38', 'pMAPKAPK', 'pAMPKa', 'pBAD', 'pHistone_H2A', 'p90RSK', 'pP120_catenin', 'Beta_catenin_active', 'pGSK', 'pERK1_2', 'pSMAD2_3', 'PLK', 'CHGA', 'pDNAPK', 'pS6', 'CD90', 'cPARP', 'pCHK1', 'Cyclin_B1', 'pPKCa']

@@ -1,0 +1,64 @@
+# @package _global_
+defaults:
+  - override /model: trellis_mlp_fm.yaml
+  - override /datamodule: trellis_dataloader.yaml
+  - override /logger:
+      - csv
+      - wandb
+  - override /trainer: gpu
+
+hydra:
+  launcher:
+    name: "fm_trellis"
+
+seed: 0
+
+datamodule:
+  batch_size: 1
+  ivp_batch_size: 1024
+  split: patients
+  plot_pca: False
+  num_components: null
+  use_small_exp_num: False
+  seed: 0
+
+model:
+  name: fm_trellis
+  lr: 1e-4
+  dim: 43
+  num_hidden: 512
+  num_layers: 7 
+  num_treat_conditions: 11
+  base: source
+  pca_space_eval: True # only used of num_components is not null
+  run_validation: True
+  integrate_time_steps: 500 
+  seed: 0
+
+trainer:
+  max_epochs: 750 
+  min_epochs: 750 
+  check_val_every_n_epoch: 750 
+  accelerator: gpu
+  devices: 1
+  #log_every_n_steps: 5
+
+checkpoint:
+  filename: "chkpt"
+
+# NOTE: early stopping is NOT being used
+callbacks:
+  model_checkpoint:
+    monitor: "val/2-Wasserstein-PDO"
+    save_top_k: 1
+    save_last: True
+
+  early_stopping:
+    monitor: "val/2-Wasserstein-PDO" 
+    mode: "min" 
+    patience: 100 
+    min_delta: 0 
+
+logger:
+  wandb:
+    tags: ["trellis", "fm"]

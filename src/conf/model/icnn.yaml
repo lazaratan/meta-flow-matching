@@ -1,0 +1,7 @@
+# @package _global_
+model:
+  _target_: models.icnn_module.cellOT_ICNN_PL
+  config: src/conf/model/cellot_specs.yaml
+  input_dim: None
+  target: None
+  pca: None

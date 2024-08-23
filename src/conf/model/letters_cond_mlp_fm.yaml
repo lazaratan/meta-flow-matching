@@ -1,0 +1,10 @@
+# @package _global_
+model:
+  _target_: src.models.letters_module.LettersCGFM
+  name: cond_fm_letters
+  lr: 1e-5
+  dim: 2
+  num_hidden: 512
+  base: source
+  integrate_time_steps: 500
+  num_conditions: null

@@ -1,0 +1,11 @@
+# @package _global_
+model:
+  _target_: src.models.letters_module.LettersMFM
+  name: gnn_letters
+  flow_lr: 1e-4
+  gnn_lr: 1e-4
+  dim: 2
+  num_hidden: 512
+  num_hidden_gnn: 64
+  base: source
+  integrate_time_steps: 500

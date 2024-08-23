@@ -1,0 +1,59 @@
+# @package _global_
+defaults:
+  - override /model: letters_gnn_mlp_fm.yaml
+  - override /datamodule: letters_batch_dataloader.yaml
+  - override /logger:
+      - csv
+      - wandb
+  - override /trainer: gpu
+
+hydra:
+  launcher:
+    name: "mfm_letters"
+
+seed: 0
+
+datamodule:
+  batch_size: 10
+  ivp_batch_size: 700
+  noise_scale: 0.05
+  source_noise_scale: 0.5
+  num_rotations: 10
+  conditional: False
+  seed: 0
+
+model:
+  name: mfm_letters
+  flow_lr: 1e-4 #1e-4
+  gnn_lr: 1e-4 #1e-4
+  dim: 2
+  num_hidden: 512
+  num_layers_decoder: 4
+  num_hidden_gnn: 64 #256
+  num_layers_gnn: 3
+  knn_k: 50
+  skip_connections: False
+  base: source
+  integrate_time_steps: 500
+
+trainer:
+  max_epochs: 24000
+  min_epochs: 24000
+  check_val_every_n_epoch: 24000 
+  #log_every_n_steps: 10
+  accelerator: gpu
+  devices: 1
+
+checkpoint:
+  filename: "chkpt"
+
+# NOTE: early stopping is NOT being used
+early_stopping:
+  monitor: "val/2-Wasserstein" 
+  mode: "min" 
+  patience: 100 
+  min_delta: 0 
+
+logger:
+  wandb:
+    tags: ["letters", "mfm"]

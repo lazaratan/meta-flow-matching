@@ -1,0 +1,13 @@
+# @package _global_
+model:
+  _target_: src.models.trellis_module.TrellisCGFM
+  name: fm_trellis
+  lr: 1e-3
+  dim: 44
+  num_hidden: 512
+  num_layers: 3
+  num_exp_conditions: 927
+  num_treat_conditions: 11
+  base: source
+  integrate_time_steps: 100
+  seed: 0

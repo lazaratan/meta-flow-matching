@@ -1,0 +1,10 @@
+# @package _global_
+datamodule:
+  _target_: src.datamodule.trellis_dataloader.TrellisDatamodule
+  batch_size: 1 # each batch contains the entire replicate (many cells)
+  ivp_batch_size: 1024
+  split: patients
+  plot_pca: False
+  num_components: null
+  use_small_exp_num: False
+  seed: 0

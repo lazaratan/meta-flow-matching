@@ -1,0 +1,16 @@
+# @package _global_
+model:
+  _target_: src.models.trellis_module.TrellisMFM
+  name: gnn_trellis
+  flow_lr: 1e-3
+  gnn_lr: 5e-4
+  dim: 43
+  num_hidden: 512
+  num_layers_decoder: 3
+  num_hidden_gnn: 512
+  knn_k: 1
+  num_treat_conditions: null
+  num_cell_conditions: null
+  base: source
+  integrate_time_steps: 100
+  seed: 0

@@ -1,0 +1,42 @@
+# @package _global_
+defaults:
+  - model: icnn.yaml
+  - datamodule: trellis_dataloader.yaml
+
+trainer:
+  max_epochs: 1000
+  min_epochs: 10
+  accelerator: "cpu"
+  precision: 32
+  log_every_n_steps: 1
+  max_time: 00:12:00:00 # max 2 days
+  check_val_every_n_epoch: 20
+
+hydra:
+  run:
+    dir: 'default'
+
+checkpoint:
+  dirpath: "default"
+  filename: "checkpoint"
+  monitor: "val_avg_mmd"
+
+wandb_path: "default"
+
+skip_tests: False
+seed: 10
+sigma: 0.0
+multiple_hot: True
+naming: "trellis_icnn"
+n_testpt: 100
+testing: False
+n_bootstrap: 10
+iter_eval_num: 10
+max_iter: 100
+wandb_run: True 
+early_stopping:
+  monitor: 'val_avg_1-Wasserstein' 
+  mode: 'min'
+  patience: 3
+  verbose: True
+ 
