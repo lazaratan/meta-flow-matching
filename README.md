@@ -28,7 +28,7 @@
 
 In natural sciences, multiple processes can be represented as vector fields on the Wasserstein manifold of probability densities - i.e. the change of the population at any moment in time depends on the population itself due to the interactions between samples/particles. One domain of applications is personalized medicine, where the development of diseases and the respective effect/response of treatments depend on the microenvironment of cells specific to each patient.
 
-In MFM, we jointly trains a vector field model $v_t(\cdot | \varphi(p_0; \theta); \omega)$ and a population embedding model $\varphi(p_0; \theta)$. Initial populations are embedded into lower dimensional representations using a Graph Neural Network (GNN). This gives MFM the ability to generalize over unseen distributions, unlike previously proposed methods. We show the ability of MFM to improve prediction of individual treatment responses on a [large-scale multi-patient single-cell drug screen dataset](https://www.cell.com/cell/pdf/S0092-8674(23)01220-5.pdf).
+In MFM, we jointly train a vector field model $v_t(\cdot | \varphi(p_0; \theta); \omega)$ and a population embedding model $\varphi(p_0; \theta)$. Initial populations are embedded into lower dimensional representations using a Graph Neural Network (GNN). This gives MFM the ability to generalize over unseen distributions, unlike previously proposed methods. We show the ability of MFM to improve prediction of individual treatment responses on a [large-scale multi-patient single-cell drug screen dataset](https://www.cell.com/cell/pdf/S0092-8674(23)01220-5.pdf).
 
 This repo contains all elements needed to reproduce our results. See [this http link](https://arxiv.org) for the paper.
 
