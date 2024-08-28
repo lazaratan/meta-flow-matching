@@ -35,16 +35,23 @@ This repo contains all elements needed to reproduce our results. See [this http 
 The data can be downloaded here: [Data (biological data download link)](https://data.mendeley.com/datasets/hc8gxwks3p/1)
 
 <div align="left">
-If you find this code useful in your research, please cite the following paper (expand for BibTeX): TODO
+  
+If you find this code useful in your research, please cite the following paper (expand for BibTeX):
 
 
 <details>
 <summary>
-TODO
+L. Atanackovic*, X. Zhang*, B. Amos, M. Blanchette, L.J. Lee, Y. Bengio, A. Tong, K. Neklyudov. Meta Flow Matching: Integrating Vector Fields on the Wasserstein Manifold, 2024.
 </summary>
 
 ```bibtex
-TODO
+@article{atanackovic2024meta,
+      title={Meta Flow Matching: Integrating Vector Fields on the Wasserstein Manifold}, 
+      author={Lazar Atanackovic and Xi Zhang and Brandon Amos and Mathieu Blanchette and Leo J. Lee and Yoshua Bengio and Alexander Tong and Kirill Neklyudov},
+      year={2024},
+      eprint={2408.14608},
+      archivePrefix={arXiv},
+}
 ```
 
 </details>
