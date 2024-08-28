@@ -2,7 +2,7 @@
 
 # Meta Flow Matching
 
-[![Paper](http://img.shields.io/badge/paper-arxiv.2302.00482-B31B1B.svg)](https://arxiv.org)
+[![Paper](http://img.shields.io/badge/paper-arxiv.2302.00482-B31B1B.svg)]([https://arxiv.org](https://arxiv.org/abs/2408.14608))
 [![python](https://img.shields.io/badge/-Python_3.9_%7C_3.10-blue?logo=python&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![pytorch](https://img.shields.io/badge/PyTorch_2.1+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
 [![lightning](https://img.shields.io/badge/-Lightning_1.9+-792ee5?logo=pytorchlightning&logoColor=white)](https://pytorchlightning.ai/)
@@ -30,7 +30,7 @@ In natural sciences, multiple processes can be represented as vector fields on t
 
 In MFM, we jointly train a vector field model $v_t(\cdot | \varphi(p_0; \theta); \omega)$ and a population embedding model $\varphi(p_0; \theta)$. Initial populations are embedded into lower dimensional representations using a Graph Neural Network (GNN). This gives MFM the ability to generalize over unseen distributions, unlike previously proposed methods. We show the ability of MFM to improve prediction of individual treatment responses on a [large-scale multi-patient single-cell drug screen dataset](https://www.cell.com/cell/pdf/S0092-8674(23)01220-5.pdf).
 
-This repo contains all elements needed to reproduce our results. See [this http link](https://arxiv.org) for the paper.
+This repo contains all elements needed to reproduce our results. See [this http link]([https://arxiv.org](https://arxiv.org/abs/2408.14608)) for the paper.
 
 The data can be downloaded here: [Data (biological data download link)](https://data.mendeley.com/datasets/hc8gxwks3p/1)
 
