@@ -465,7 +465,7 @@ class TrellisDatamodule(pl.LightningDataModule):
         ivp_batch_size=1024,
         split="patients",  # ["patients", "replicas"]
         plot_pca=False,
-        marker_cols="/h/lazar/scCFM/src/conf/datamodule/trellis_marker_col.yaml",
+        marker_cols="src/conf/datamodule/trellis_marker_col.yaml",
         control=set(["DMSO", "AH", "H2O"]),
         treatment=["O", "S", "VS", "L", "V", "F", "C", "SF", "CS", "CF", "CSF"],
         culture=["PDO", "PDOF", "F"],
@@ -483,15 +483,15 @@ class TrellisDatamodule(pl.LightningDataModule):
         assert split in ["patients", "replicas"], "split must be either 'patients' or 'replicas'"
         if split == "patients":
             self.split_source = (
-                "/scratch/ssd004/scratch/lazar/files/data_splits_patients.pickle"
+                "data_splits_patients.pickle"
             )
-            data_path = "/scratch/ssd004/scratch/lazar/files/trellis_patients_normalized.npy"
+            data_path = "trellis_patients_normalized.npy"
         elif split == "replicas":
             self.split_source = (
-                "/scratch/ssd004/scratch/lazar/files/data_splits_replicas.pickle"
+                "data_splits_replicas.pickle"
             )
             data_path = (
-                "/scratch/ssd004/scratch/lazar/files/trellis_replicas_normalized.npy"
+                "trellis_replicas_normalized.npy"
             )
         else:
             raise ValueError("split not recognized")
