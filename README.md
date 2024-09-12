@@ -2,7 +2,7 @@
 
 # Meta Flow Matching
 
-[![Paper](http://img.shields.io/badge/paper-arxiv.2302.00482-B31B1B.svg)](https://arxiv.org)
+[![Paper](http://img.shields.io/badge/paper-arxiv.2408.14608-B31B1B.svg)](https://arxiv.org/abs/2408.14608)
 [![python](https://img.shields.io/badge/-Python_3.9_%7C_3.10-blue?logo=python&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![pytorch](https://img.shields.io/badge/PyTorch_2.1+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
 [![lightning](https://img.shields.io/badge/-Lightning_1.9+-792ee5?logo=pytorchlightning&logoColor=white)](https://pytorchlightning.ai/)
@@ -28,23 +28,32 @@
 
 In natural sciences, multiple processes can be represented as vector fields on the Wasserstein manifold of probability densities - i.e. the change of the population at any moment in time depends on the population itself due to the interactions between samples/particles. One domain of applications is personalized medicine, where the development of diseases and the respective effect/response of treatments depend on the microenvironment of cells specific to each patient.
 
-In MFM, we jointly trains a vector field model $v_t(\cdot | \varphi(p_0; \theta); \omega)$ and a population embedding model $\varphi(p_0; \theta)$. Initial populations are embedded into lower dimensional representations using a Graph Neural Network (GNN). This gives MFM the ability to generalize over unseen distributions, unlike previously proposed methods. We show the ability of MFM to improve prediction of individual treatment responses on a [large-scale multi-patient single-cell drug screen dataset](https://www.cell.com/cell/pdf/S0092-8674(23)01220-5.pdf).
+In MFM, we jointly train a vector field model $v_t(\cdot | \varphi(p_0; \theta); \omega)$ and a population embedding model $\varphi(p_0; \theta)$. Initial populations are embedded into lower dimensional representations using a Graph Neural Network (GNN). This gives MFM the ability to generalize over unseen distributions, unlike previously proposed methods. We show the ability of MFM to improve prediction of individual treatment responses on a [large-scale multi-patient single-cell drug screen dataset (Ramos Zapatero et al. Cell, 2023)](https://www.cell.com/cell/pdf/S0092-8674(23)01220-5.pdf).
 
-This repo contains all elements needed to reproduce our results. See [this http link](https://arxiv.org) for the paper.
+This repo contains all elements needed to reproduce our results. See [this http link](https://arxiv.org/abs/2408.14608) for the paper.
 
-The data can be downloaded here: [Data (biological data download link)](https://data.mendeley.com/datasets/hc8gxwks3p/1)
+The preprocessed data can be downloaded here: [Preprocessed organoid data](https://huggingface.co/datasets/lazaratan/meta-flow-matching-organoid-data-preprocessed)
+
+The raw data can be downloaded here: [Raw organoid data](https://data.mendeley.com/datasets/hc8gxwks3p/1). For usability, we provide the notebook [trellis_data.ipynb](notebooks/trellis_data.ipynb) which contains further dataset details and code for the data preprocessing.
 
 <div align="left">
-If you find this code useful in your research, please cite the following paper (expand for BibTeX): TODO
+  
+If you find this code useful in your research, please cite the following paper (expand for BibTeX):
 
 
 <details>
 <summary>
-TODO
+L. Atanackovic*, X. Zhang*, B. Amos, M. Blanchette, L.J. Lee, Y. Bengio, A. Tong, K. Neklyudov. Meta Flow Matching: Integrating Vector Fields on the Wasserstein Manifold, 2024.
 </summary>
 
 ```bibtex
-TODO
+@article{atanackovic2024meta,
+      title={Meta Flow Matching: Integrating Vector Fields on the Wasserstein Manifold}, 
+      author={Lazar Atanackovic and Xi Zhang and Brandon Amos and Mathieu Blanchette and Leo J. Lee and Yoshua Bengio and Alexander Tong and Kirill Neklyudov},
+      year={2024},
+      eprint={2408.14608},
+      archivePrefix={arXiv},
+}
 ```
 
 </details>
@@ -87,7 +96,7 @@ To train a model via MFM on the synthetic letters setting, use
 python train.py experiment=letters_mfm.yaml
 ```
 
-To run the biological experiments, first download and pre-process the data using the [trellis_data.ipynb](notebooks/trellis_data.ipynb). Then, similar to the synthetic letters experiment, executing
+To run the biological experiments, first download the preprocessed data [here](https://huggingface.co/datasets/lazaratan/meta-flow-matching-organoid-data-preprocessed). Then, similar to the synthetic letters experiment, executing
 
 ```bash
 python train.py experiment=trellis_mfm.yaml
