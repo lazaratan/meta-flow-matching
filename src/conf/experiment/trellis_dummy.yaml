@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
-  - override /model: trellis_cond_mlp_cgfm.yaml
-  - override /datamodule: trellis_dataloader.yaml 
+  - override /model: trellis_dummy.yaml
+  - override /datamodule: trellis_dataloader.yaml
   - override /logger:
       - csv
       - wandb
@@ -9,7 +9,7 @@ defaults:
 
 hydra:
   launcher:
-    name: "cgfm_trellis"
+    name: "dummy_trellis"
 
 seed: 0
 
@@ -23,28 +23,26 @@ datamodule:
   seed: 0
 
 model:
-  name: cgfm_trellis
+  name: dummy_trellis
   lr: 1e-4
   dim: 43
   num_hidden: 512
   num_layers: 7 
-  base: source 
-  ot_sample: True
-  num_exp_conditions: 927
   num_treat_conditions: 11
+  base: source
   pca_space_eval: False # only used of num_components is not null
   run_validation: False
   integrate_time_steps: 500 
   seed: 0
 
 trainer:
-  max_epochs: 750
-  min_epochs: 750
-  check_val_every_n_epoch: 750
+  max_epochs: 1 
+  min_epochs: 1 
+  check_val_every_n_epoch: 1
   accelerator: gpu
   devices: 1
   num_sanity_val_steps: 0
-  #log_every_n_steps: 500
+  #log_every_n_steps: 5
 
 checkpoint:
   filename: "chkpt"
@@ -57,11 +55,11 @@ callbacks:
     save_last: True
 
   early_stopping:
-    monitor: "train/loss" 
+    monitor: "train/loss"
     mode: "min" 
     patience: 100 
     min_delta: 0 
 
 logger:
   wandb:
-    tags: ["trellis", "cgfm"]
+    tags: ["trellis", "dummy"]

@@ -16,10 +16,11 @@ seed: 0
 datamodule:
   batch_size: 1
   ivp_batch_size: 1024
-  split: patients
+  split: pdo21 #['replicas-1', 'replicas-2', 'pdo21', 'pdo27', 'pdo75']
   num_components: null
   plot_pca: False
   use_small_exp_num: False
+  save_embeddings: False
   seed: 0
 
 model:
@@ -35,8 +36,9 @@ model:
   num_treat_conditions: 11
   num_cell_conditions: 2
   base: source
-  pca_space_eval: True # only used of num_components is not null
-  run_validation: True
+  ot_sample: False #TODO: future work
+  pca_space_eval: False # only used of num_components is not null
+  run_validation: False #
   integrate_time_steps: 500 
   seed: 0
 
@@ -46,6 +48,7 @@ trainer:
   check_val_every_n_epoch: 1500 
   accelerator: gpu
   devices: 1
+  num_sanity_val_steps: 0
   #log_every_n_steps: 5
 
 checkpoint:
@@ -54,13 +57,13 @@ checkpoint:
 slurm:
   requeue: True
 
-# NOTE: early stopping is NOT being used
+# NOTE: early stopping is not being used
 callbacks:
   model_checkpoint:
-    monitor: "val/2-Wasserstein-PDO" 
+    monitor: "train/loss" 
 
   early_stopping:
-    monitor: "val/2-Wasserstein-PDO" 
+    monitor: "train/loss" 
     mode: "min" 
     patience: 100 
     min_delta: 0 

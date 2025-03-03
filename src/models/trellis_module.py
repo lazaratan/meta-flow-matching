@@ -6,11 +6,15 @@ In this code base, we use the name "trellis" as a short hand for this dataset.
 import os
 import numpy as np
 import pandas as pd
+import ot as pot
 import torch
 import torch.optim as optim
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 import wandb
+import pickle 
+from tqdm import tqdm
+from collections import defaultdict
 
 from torchdyn.core import NeuralODE
 from util.distribution_distances import compute_distribution_distances
@@ -41,6 +45,407 @@ TREAT_NAMES = {
     "CSF": "SN-38 + 5-FU + Cetux",
 }
 
+
+class TrellisDummy(pl.LightningModule):
+    def __init__(
+        self,
+        train_eval_batches,
+        train_populations_means,
+        lr=1e-4,
+        dim=43,
+        num_hidden=512,
+        num_layers=7,
+        num_treat_conditions=11,
+        base="source",
+        integrate_time_steps=500,
+        num_train_replica=861,
+        num_test_replica=33,
+        num_val_replica=33,
+        pca_for_plot=None,
+        treatments=None,
+        pca=None,
+        pca_space_eval=True,
+        run_validation=True, 
+        name="trellis_dummy",
+        seed=0,
+    ) -> None:
+        super().__init__()
+
+        # Important: This property controls manual optimization.
+        self.automatic_optimization = True
+
+        self.save_hyperparameters(ignore=["train_eval_batches", "train_populations_means", "pca_for_plot"])
+        
+        self.lr = lr
+        self.dim = dim
+        self.num_hidden = num_hidden
+        self.integrate_time_steps = integrate_time_steps
+        self.num_train_replica = num_train_replica
+        self.pca = pca # log if PCA is being used on data
+        self.pca_space_eval = pca_space_eval
+
+        self.run_validation = run_validation
+        
+        assert base in [
+            "source",
+            "gaussian",
+        ], "Invalid base. Must be either 'source' or 'gaussian'"
+        self.base = base
+        self.name = name
+        
+        # eval cell batch rng
+        self.rng = np.random.default_rng(seed)
+        
+        # for training data eval
+        if train_eval_batches is not None:
+            self.train_eval_batches = train_eval_batches
+            self.train_shift_mean = torch.mean(torch.stack(train_populations_means), dim=0)
+            self.use_pre_train_eval_batches = True # flag for pre-defined population use for train-set evaluation 
+        else:
+            self.num_train_evals = 100
+            self.train_evals_count = 0
+            self.train_eval_batches = []
+            self.use_pre_train_eval_batches = False 
+            
+        # for plotting
+        self.pca_for_plot = pca_for_plot
+        self.treatments = treatments
+        n_plot_idcs = num_test_replica
+        interval_plot_idcs = int(n_plot_idcs / 5)
+        self.idcs_for_plot = [i for i in range(1, n_plot_idcs, interval_plot_idcs)]
+        
+        self.train_metrics_base = {"PDO": [], "PDOF": [], "F": []}
+        self.train_metrics_shift = {"PDO": [], "PDOF": [], "F": []}
+        self.train_metrics_ideal_shift = {"PDO": [], "PDOF": [], "F": []}
+        self.val_metrics_base = {"PDO": [], "PDOF": [], "F": []}
+        self.val_metrics_shift = {"PDO": [], "PDOF": [], "F": []}
+        self.val_metrics_ideal_shift = {"PDO": [], "PDOF": [], "F": []}
+        self.test_metrics_base = {"PDO": [], "PDOF": [], "F": []}
+        self.test_metrics_shift = {"PDO": [], "PDOF": [], "F": []}
+        self.test_metrics_ideal_shift = {"PDO": [], "PDOF": [], "F": []}
+
+    def configure_optimizers(self):
+        return None
+
+    def forward(self, t, x):
+        return None
+
+    def training_step(self, batch, batch_idx):
+        return None
+    
+    def training_epoch_end(self, outputs):
+        if self.current_epoch == self.trainer.max_epochs - 1:
+            for batch in self.train_eval_batches:
+                self.eval_batch(batch, prefix="train")
+            
+            # base
+            list_train_metrics = []
+            for culture_key in list(self.train_metrics_base.keys()):
+                eval_metrics_mean_train = {
+                    k: np.mean([m[k] for m in self.train_metrics_base[culture_key]])
+                    for k in self.train_metrics_base[culture_key][0]
+                }
+                for key, value in eval_metrics_mean_train.items():
+                    self.log(
+                        f"train-BASE/{key}-{culture_key}",
+                        value,
+                        on_step=False,
+                        on_epoch=True,
+                    )
+                list_train_metrics.append(eval_metrics_mean_train)
+
+            avg_train_metrics = dict(pd.DataFrame(list_train_metrics).mean())
+            for key, value in avg_train_metrics.items():
+                self.log(f"train-BASE/{key}-avg", value, on_step=False, on_epoch=True)
+
+            if self.use_pre_train_eval_batches is False:
+                self.train_eval_batches = []
+                self.train_evals_count = 0
+                
+            self.train_metrics_base = {"PDO": [], "PDOF": [], "F": []}
+
+            # shift
+            list_train_metrics = []
+            for culture_key in list(self.train_metrics_shift.keys()):
+                eval_metrics_mean_train = {
+                    k: np.mean([m[k] for m in self.train_metrics_shift[culture_key]])
+                    for k in self.train_metrics_shift[culture_key][0]
+                }
+                for key, value in eval_metrics_mean_train.items():
+                    self.log(
+                        f"train-SHIFT/{key}-{culture_key}",
+                        value,
+                        on_step=False,
+                        on_epoch=True,
+                    )
+                list_train_metrics.append(eval_metrics_mean_train)
+
+            avg_train_metrics = dict(pd.DataFrame(list_train_metrics).mean())
+            for key, value in avg_train_metrics.items():
+                self.log(f"train-SHIFT/{key}-avg", value, on_step=False, on_epoch=True)
+
+            if self.use_pre_train_eval_batches is False:
+                self.train_eval_batches = []
+                self.train_evals_count = 0
+                
+            self.train_metrics_shift = {"PDO": [], "PDOF": [], "F": []}
+            
+            # ideal
+            list_train_metrics = []
+            for culture_key in list(self.train_metrics_ideal_shift.keys()):
+                eval_metrics_mean_train = {
+                    k: np.mean([m[k] for m in self.train_metrics_ideal_shift[culture_key]])
+                    for k in self.train_metrics_ideal_shift[culture_key][0]
+                }
+                for key, value in eval_metrics_mean_train.items():
+                    self.log(
+                        f"train-IDEAL-SHIFT/{key}-{culture_key}",
+                        value,
+                        on_step=False,
+                        on_epoch=True,
+                    )
+                list_train_metrics.append(eval_metrics_mean_train)
+
+            avg_train_metrics = dict(pd.DataFrame(list_train_metrics).mean())
+            for key, value in avg_train_metrics.items():
+                self.log(f"train-IDEAL-SHIFT/{key}-avg", value, on_step=False, on_epoch=True)
+
+            if self.use_pre_train_eval_batches is False:
+                self.train_eval_batches = []
+                self.train_evals_count = 0
+                
+            self.train_metrics_ideal_shift = {"PDO": [], "PDOF": [], "F": []}
+
+    def predict_step(self, batch, batch_idx):
+        # only used at test time when evaluating models on train data
+        if self.train_evals_count < self.num_train_evals:
+            self.eval_batch(batch, prefix="train")
+            self.train_evals_count += 1
+        elif self.train_evals_count == self.num_train_evals:
+            # only used at test time when evaluating models on train data
+            list_eval_metrics = []
+            for culture_key in list(self.train_metrics.keys()):
+                if not self.train_metrics[culture_key]:
+                    continue
+                eval_metrics_mean_ood = {
+                    k: np.mean([m[k] for m in self.train_metrics[culture_key]])
+                    for k in self.train_metrics[culture_key][0]
+                }
+                list_eval_metrics.append(eval_metrics_mean_ood)
+
+            avg_eval_metrics = dict(pd.DataFrame(list_eval_metrics).mean())
+            self.train_evals_count += 1
+            print(avg_eval_metrics) # pyl predict hook doesn't let you log so we print ...
+        else:
+            pass
+
+    def validation_step(self, batch, batch_idx):
+        if self.run_validation:
+            self.eval_batch(batch, prefix="val")
+        else:
+            return None
+
+    def validation_epoch_end(self, outputs):
+        if self.run_validation:
+            # base
+            list_val_metrics = []
+            for culture_key in list(self.val_metrics_base.keys()):
+                if not self.val_metrics_base[culture_key]:
+                    continue
+                eval_metrics_mean_ood = {
+                    k: np.mean([m[k] for m in self.val_metrics_base[culture_key]])
+                    for k in self.val_metrics_base[culture_key][0]
+                }
+                for key, value in eval_metrics_mean_ood.items():
+                    self.log(
+                        f"val-BASE/{key}-{culture_key}", value, on_step=False, on_epoch=True
+                    )
+                list_val_metrics.append(eval_metrics_mean_ood)
+
+            avg_val_metrics = dict(pd.DataFrame(list_val_metrics).mean())
+            for key, value in avg_val_metrics.items():
+                self.log(f"val-BASE/{key}-avg", value, on_step=False, on_epoch=True)
+
+            self.val_metrics_base = {"PDO": [], "PDOF": [], "F": []}
+
+            # shift
+            list_val_metrics = []
+            for culture_key in list(self.val_metrics_shift.keys()):
+                if not self.val_metrics_shift[culture_key]:
+                    continue
+                eval_metrics_mean_ood = {
+                    k: np.mean([m[k] for m in self.val_metrics_shift[culture_key]])
+                    for k in self.val_metrics_shift[culture_key][0]
+                }
+                for key, value in eval_metrics_mean_ood.items():
+                    self.log(
+                        f"val-SHIFT/{key}-{culture_key}", value, on_step=False, on_epoch=True
+                    )
+                list_val_metrics.append(eval_metrics_mean_ood)
+
+            avg_val_metrics = dict(pd.DataFrame(list_val_metrics).mean())
+            for key, value in avg_val_metrics.items():
+                self.log(f"val-SHIFT/{key}-avg", value, on_step=False, on_epoch=True)
+
+            self.val_metrics_shift = {"PDO": [], "PDOF": [], "F": []}
+            
+            # ideal
+            list_val_metrics = []
+            for culture_key in list(self.val_metrics_ideal_shift.keys()):
+                if not self.val_metrics_ideal_shift[culture_key]:
+                    continue
+                eval_metrics_mean_ood = {
+                    k: np.mean([m[k] for m in self.val_metrics_ideal_shift[culture_key]])
+                    for k in self.val_metrics_ideal_shift[culture_key][0]
+                }
+                for key, value in eval_metrics_mean_ood.items():
+                    self.log(
+                        f"val-IDEAL-SHIFT/{key}-{culture_key}", value, on_step=False, on_epoch=True
+                    )
+                list_val_metrics.append(eval_metrics_mean_ood)
+
+            avg_val_metrics = dict(pd.DataFrame(list_val_metrics).mean())
+            for key, value in avg_val_metrics.items():
+                self.log(f"val-IDEAL-SHIFT/{key}-avg", value, on_step=False, on_epoch=True)
+
+            self.val_metrics_ideal_shift = {"PDO": [], "PDOF": [], "F": []}
+        else:
+            return None
+
+    def test_step(self, batch, batch_idx):
+        self.eval_batch(batch, prefix="test")
+
+    def test_epoch_end(self, outputs):
+        # base
+        list_test_metrics = []
+        for culture_key in list(self.test_metrics_base.keys()):
+            if not self.test_metrics_base[culture_key]:
+                continue
+            eval_metrics_mean_ood = {
+                k: np.mean([m[k] for m in self.test_metrics_base[culture_key]])
+                for k in self.test_metrics_base[culture_key][0]
+            }
+            for key, value in eval_metrics_mean_ood.items():
+                self.log(
+                    f"test-BASE/{key}-{culture_key}", value, on_step=False, on_epoch=True
+                )
+            list_test_metrics.append(eval_metrics_mean_ood)
+
+        avg_test_metrics = dict(pd.DataFrame(list_test_metrics).mean())
+        for key, value in avg_test_metrics.items():
+            self.log(f"test-BASE/{key}-avg", value, on_step=False, on_epoch=True)
+
+        self.test_metrics_base = {"PDO": [], "PDOF": [], "F": []}
+        
+        # shift
+        list_test_metrics = []
+        for culture_key in list(self.test_metrics_shift.keys()):
+            if not self.test_metrics_shift[culture_key]:
+                continue
+            eval_metrics_mean_ood = {
+                k: np.mean([m[k] for m in self.test_metrics_shift[culture_key]])
+                for k in self.test_metrics_shift[culture_key][0]
+            }
+            for key, value in eval_metrics_mean_ood.items():
+                self.log(
+                    f"test-SHIFT/{key}-{culture_key}", value, on_step=False, on_epoch=True
+                )
+            list_test_metrics.append(eval_metrics_mean_ood)
+
+        avg_test_metrics = dict(pd.DataFrame(list_test_metrics).mean())
+        for key, value in avg_test_metrics.items():
+            self.log(f"test-SHIFT/{key}-avg", value, on_step=False, on_epoch=True)
+
+        self.test_metrics_shift = {"PDO": [], "PDOF": [], "F": []}
+        
+        # ideal
+        list_test_metrics = []
+        for culture_key in list(self.test_metrics_ideal_shift.keys()):
+            if not self.test_metrics_ideal_shift[culture_key]:
+                continue
+            eval_metrics_mean_ood = {
+                k: np.mean([m[k] for m in self.test_metrics_ideal_shift[culture_key]])
+                for k in self.test_metrics_ideal_shift[culture_key][0]
+            }
+            for key, value in eval_metrics_mean_ood.items():
+                self.log(
+                    f"test-IDEAL-SHIFT/{key}-{culture_key}", value, on_step=False, on_epoch=True
+                )
+            list_test_metrics.append(eval_metrics_mean_ood)
+
+        avg_test_metrics = dict(pd.DataFrame(list_test_metrics).mean())
+        for key, value in avg_test_metrics.items():
+            self.log(f"test-IDEAL-SHIFT/{key}-avg", value, on_step=False, on_epoch=True)
+
+        self.test_metrics_ideal_shift = {"PDO": [], "PDOF": [], "F": []}
+
+    def eval_batch(self, batch, prefix):
+        idx, culture, x0, x1, x1_full, _, treat_cond, _ = batch
+
+        time_span = torch.linspace(0, 1, self.integrate_time_steps)
+        ts_for_plot = self.integrate_time_steps / 5
+        ts = [i for i in range(int(ts_for_plot - 1), self.integrate_time_steps, int(ts_for_plot))]
+        
+        with torch.no_grad():
+            if len(x0.shape) > 3:
+                x0 = x0.squeeze(0)
+                x1 = x1.squeeze(0)
+                x1_full = x1_full.squeeze(0)
+                treat_cond = treat_cond.squeeze(0)
+            
+            for i in range(
+                x0.shape[0]
+            ):  # for loop used to allow for replicate batching for eval
+                x0_i = x0[i].float()
+                
+                if self.base == "gaussian":
+                    x0_i = torch.randn_like(x0_i)
+                
+                if self.pca is not None and self.dim == 43 and self.pca_space_eval:
+                    pred = self.pca.inverse_transform(pred.cpu().numpy())
+                    pred = torch.tensor(pred).cuda()
+                    
+                true = x1_full.float() if self.pca is not None and self.dim == 43 else x1.float()
+                
+                # compute base distances
+                names_base, dd_base = compute_distribution_distances(
+                x0_i.unsqueeze(1),
+                true[0].unsqueeze(1),
+                )
+                
+                #print("train mean for shift:", self.train_shift_mean)
+                x0_shift = x0_i.clone() - torch.mean(x0_i, dim=0)
+                x0_shift = x0_shift + self.train_shift_mean.to(x0_shift)
+                
+                names_shift, dd_shift = compute_distribution_distances(
+                    x0_shift.unsqueeze(1),
+                    true[0].unsqueeze(1),
+                )
+                
+                x0_ideal_shift = x0_i.clone() - torch.mean(x0_i, dim=0)
+                x0_ideal_shift = x0_ideal_shift + torch.mean(true[i], dim=0)
+                
+                names_ideal_shift, dd_ideal_shift = compute_distribution_distances(
+                    x0_ideal_shift.unsqueeze(1),
+                    true[0].unsqueeze(1),
+                )
+       
+                if prefix == "train":
+                    self.train_metrics_base[culture[0]].append({**dict(zip(names_base, dd_base))})
+                    self.train_metrics_shift[culture[0]].append({**dict(zip(names_shift, dd_shift))})
+                    self.train_metrics_ideal_shift[culture[0]].append({**dict(zip(names_ideal_shift, dd_ideal_shift))})
+                elif prefix == "val":
+                    self.val_metrics_base[culture[0]].append({**dict(zip(names_base, dd_base))})
+                    self.val_metrics_shift[culture[0]].append({**dict(zip(names_shift, dd_shift))})
+                    self.val_metrics_ideal_shift[culture[0]].append({**dict(zip(names_ideal_shift, dd_ideal_shift))})
+                elif prefix == "test":
+                    self.test_metrics_base[culture[0]].append({**dict(zip(names_base, dd_base))})
+                    self.test_metrics_shift[culture[0]].append({**dict(zip(names_shift, dd_shift))})
+                    self.test_metrics_ideal_shift[culture[0]].append({**dict(zip(names_ideal_shift, dd_ideal_shift))})
+                else:
+                    raise ValueError(f"unknown prefix: {prefix}")
+                
+
 class TrellisFM(pl.LightningModule):
     def __init__(
         self,
@@ -51,6 +456,7 @@ class TrellisFM(pl.LightningModule):
         num_layers=7,
         num_treat_conditions=11,
         base="source",
+        ot_sample=False,
         integrate_time_steps=500,
         num_train_replica=861,
         num_test_replica=33,
@@ -85,8 +491,15 @@ class TrellisFM(pl.LightningModule):
         self.num_train_replica = num_train_replica
         self.pca = pca # log if PCA is being used on data
         self.pca_space_eval = pca_space_eval
+        self.ot_sample = ot_sample
 
         self.run_validation = run_validation
+        
+        self.save_predictions = False
+        if self.save_predictions:
+            self.data_save_source_target_pred = defaultdict(lambda: 
+                {'source': [], 'target': [], 'pred': [], 'treatment': [], 'culture': [], 'embed': []},
+                )
         
         assert base in [
             "source",
@@ -101,7 +514,7 @@ class TrellisFM(pl.LightningModule):
         # for training data eval
         if train_eval_batches is not None:
             self.train_eval_batches = train_eval_batches
-            self.use_pre_train_eval_batches = True
+            self.use_pre_train_eval_batches = True # flag for pre-defined population use for train-set evaluation 
         else:
             self.num_train_evals = 100
             self.train_evals_count = 0
@@ -111,7 +524,7 @@ class TrellisFM(pl.LightningModule):
         # for plotting
         self.pca_for_plot = pca_for_plot
         self.treatments = treatments
-        n_plot_idcs = min(num_test_replica, num_val_replica)
+        n_plot_idcs = num_test_replica
         interval_plot_idcs = int(n_plot_idcs / 5)
         self.idcs_for_plot = [i for i in range(1, n_plot_idcs, interval_plot_idcs)]
         
@@ -145,17 +558,37 @@ class TrellisFM(pl.LightningModule):
 
         loss = loss.mean()
         return loss
+    
+    def sample_ot(self, x0, x1):
+        # Resample x0, x1 according to transport matrix
+        batch_size = x0.shape[0]
+        a, b = pot.unif(x0.size()[0]), pot.unif(x1.size()[0])
+        M = torch.cdist(x0, x1) ** 2
+        pi = pot.emd(a, b, M.detach().cpu().numpy())
+        # Sample random interpolations on pi
+        p = pi.flatten()
+        p = p / p.sum()
+        choices = np.random.choice(pi.shape[0] * pi.shape[1], p=p, size=batch_size)
+        i, j = np.divmod(choices, pi.shape[1])
+        x0 = x0[i]
+        x1 = x1[j]
+        return x0, x1
 
     def training_step(self, batch, batch_idx):
         # save subset of training batches to evaluate on train data later 
-        if self.use_pre_train_eval_batches is False:
+        if self.use_pre_train_eval_batches is False: 
             if (
                 self.current_epoch % (self.trainer.check_val_every_n_epoch - 1)
             ) == 0 and self.train_evals_count < self.num_train_evals:
                 self.train_eval_batches.append(batch)
                 self.train_evals_count += 1
                         
-        _, _, x0, x1, _, _, treat_cond = batch
+        _, _, x0, x1, _, _, treat_cond, _ = batch
+        
+        if self.ot_sample:
+            for i in range(x0.shape[0]):
+                x0[i], x1[i] = self.sample_ot(x0[i], x1[i])
+        
         loss = self.compute_loss(
             x0.view(-1, x0.shape[-1]).float(),
             x1.view(-1, x1.shape[-1]).float(),
@@ -281,7 +714,7 @@ class TrellisFM(pl.LightningModule):
         self.test_metrics = {"PDO": [], "PDOF": [], "F": []}
 
     def eval_batch(self, batch, prefix):
-        idx, culture, x0, x1, x1_full, _, treat_cond = batch
+        idx, culture, x0, x1, x1_full, _, treat_cond, patient = batch
         
         node = NeuralODE(
             torch_wrapper_flow_cond(self.model),
@@ -301,7 +734,7 @@ class TrellisFM(pl.LightningModule):
                 x1 = x1.squeeze(0)
                 x1_full = x1_full.squeeze(0)
                 treat_cond = treat_cond.squeeze(0)
-
+            
             for i in range(
                 x0.shape[0]
             ):  # for loop used to allow for replicate batching for eval
@@ -333,7 +766,7 @@ class TrellisFM(pl.LightningModule):
                     pred.unsqueeze(1).to(true),
                     true[0].unsqueeze(1),
                 )
-       
+                
                 if prefix == "train":
                     self.train_metrics[culture[0]].append({**dict(zip(names, dd))})
                 elif prefix == "val":
@@ -343,6 +776,17 @@ class TrellisFM(pl.LightningModule):
                 else:
                     raise ValueError(f"unknown prefix: {prefix}")
 
+                if self.save_predictions:
+                    treat_id = torch.argmax(treat_cond).item()
+                    treat_name = TREAT_NAMES[self.treatments[treat_id]]
+                    if culture[0] == 'PDOF':
+                        #print("Patient: ", patient, "Culture: ", culture, "Treatment: ", treat_name, "Source: ", x0.shape, "Target: ", x1.shape)
+                        self.data_save_source_target_pred[patient[0]]['source'].append(x0)
+                        self.data_save_source_target_pred[patient[0]]['target'].append(x1)
+                        self.data_save_source_target_pred[patient[0]]['pred'].append(pred)
+                        self.data_save_source_target_pred[patient[0]]['culture'].append(culture)
+                        self.data_save_source_target_pred[patient[0]]['treatment'].append(treat_name)
+                        
                 # plot in 2d PCA space
                 if idx in self.idcs_for_plot and self.pca_for_plot is not None:
                     print("Plotting 2D-PCA predictions ... \n")
@@ -357,6 +801,13 @@ class TrellisFM(pl.LightningModule):
                         tag=f"fm_traj_treat_{treat_name}_{idx.item()}",
                     )
 
+    def save_population_embeddings(self):
+        if self.save_predictions:
+            with open(f'fm_predictions_patients_21.pkl', 'wb') as f:
+                pickle.dump(self.data_save_source_target_pred, f)
+                
+            print("\n Predictions saved.")
+        
     def plot(self, source, traj, target, prefix, treat_name, tag):
         # Flatten traj to [t*n, d]
         t, n, d = traj.shape
@@ -463,6 +914,7 @@ class TrellisCGFM(pl.LightningModule):
         num_hidden=512,
         num_layers=7,
         base="source",
+        ot_sample=False,
         integrate_time_steps=500,
         num_train_replica=861,
         num_test_replica=33,
@@ -478,7 +930,7 @@ class TrellisCGFM(pl.LightningModule):
         seed=0,
     ) -> None:
         super().__init__()
-
+        
         # Important: This property controls manual optimization.
         self.automatic_optimization = True
 
@@ -508,8 +960,15 @@ class TrellisCGFM(pl.LightningModule):
         self.num_val_replica = num_val_replica
         self.pca = pca 
         self.pca_space_eval = pca_space_eval
+        self.ot_sample = ot_sample
 
         self.run_validation = run_validation
+        
+        self.save_predictions = False
+        if self.save_predictions:
+            self.data_save_source_target_pred = defaultdict(lambda: 
+                {'source': [], 'target': [], 'pred': [], 'treatment': [], 'culture': [], 'embed': []},
+                )
         
         assert base in [
             "source",
@@ -524,21 +983,17 @@ class TrellisCGFM(pl.LightningModule):
         # for training data eval
         if train_eval_batches is not None:
             self.train_eval_batches = train_eval_batches
-            self.use_pre_train_eval_batches = True
+            self.use_pre_train_eval_batches = True # flag for pre-defined population use for train-set evaluation 
         else:
             self.num_train_evals = 100
             self.train_evals_count = 0
             self.train_eval_batches = []
-            self.use_pre_train_eval_batches = False
-        
-        #self.num_train_evals = 100 #6
-        #self.train_evals_count = 0
-        #self.train_eval_batches = []
+            self.use_pre_train_eval_batches = False 
         
         # for plotting
         self.pca_for_plot = pca_for_plot
         self.treatments = treatments
-        n_plot_idcs = min(num_test_replica, num_val_replica)
+        n_plot_idcs = num_test_replica
         interval_plot_idcs = int(n_plot_idcs / 5)
         self.idcs_for_plot = [i for i in range(1, n_plot_idcs, interval_plot_idcs)]
 
@@ -582,6 +1037,21 @@ class TrellisCGFM(pl.LightningModule):
         exp_cond = exp_cond.unsqueeze(1).expand(-1, x0.shape[1], -1)
         return exp_cond
     
+    def sample_ot(self, x0, x1):
+        # Resample x0, x1 according to transport matrix
+        batch_size = x0.shape[0]
+        a, b = pot.unif(x0.size()[0]), pot.unif(x1.size()[0])
+        M = torch.cdist(x0, x1) ** 2
+        pi = pot.emd(a, b, M.detach().cpu().numpy())
+        # Sample random interpolations on pi
+        p = pi.flatten()
+        p = p / p.sum()
+        choices = np.random.choice(pi.shape[0] * pi.shape[1], p=p, size=batch_size)
+        i, j = np.divmod(choices, pi.shape[1])
+        x0 = x0[i]
+        x1 = x1[j]
+        return x0, x1
+    
     def training_step(self, batch, batch_idx):
         # save subset of training batches to evaluate on train data later
         if self.use_pre_train_eval_batches is False:
@@ -591,8 +1061,12 @@ class TrellisCGFM(pl.LightningModule):
                 self.train_eval_batches.append(batch)
                 self.train_evals_count += 1
 
-        idx, _, x0, x1, _, _, treat_cond = batch
+        idx, _, x0, x1, _, _, treat_cond, _ = batch
         exp_cond = self.get_exp_cond(idx, x0)
+        
+        if self.ot_sample:
+            for i in range(x0.shape[0]):
+                x0[i], x1[i] = self.sample_ot(x0[i], x1[i])
         
         cond = torch.cat((exp_cond, treat_cond), dim=-1)
         loss = self.compute_loss(
@@ -698,10 +1172,10 @@ class TrellisCGFM(pl.LightningModule):
 
     def eval_batch(self, batch, prefix):
         if prefix == 'train':
-            idx, culture, x0, x1, x1_full, _, treat_cond = batch
+            idx, culture, x0, x1, x1_full, _, treat_cond, patient = batch
             exp_cond = self.get_exp_cond(idx, x0)
         else:
-            idx, culture, x0, x1, x1_full, _, treat_cond = batch
+            idx, culture, x0, x1, x1_full, _, treat_cond, patient = batch
             
             if prefix == 'val' or prefix == 'test':
                 num_train_conditions = self.num_exp_conditions - (self.num_val_replica + self.num_test_replica)  # for replica split use: - 111 - 103. TODO: make this a hparam.
@@ -716,7 +1190,7 @@ class TrellisCGFM(pl.LightningModule):
                             (
                                 x0.shape[0],
                                 x0.shape[1],
-                                self.num_val_replica + self.num_test_replica, #33 + 33 for patient split, for replica split use: 111 + 103.
+                                self.num_val_replica + self.num_test_replica, #for replica split use: 111 + 103.
                             )
                         ).cuda(),
                     ),
@@ -786,20 +1260,25 @@ class TrellisCGFM(pl.LightningModule):
                 else:
                     raise ValueError(f"unknown prefix: {prefix}")
             
-                # plot in 2d PCA space
-                if idx in self.idcs_for_plot and self.pca_for_plot is not None:
-                    print("Plotting 2D-PCA predictions ... \n")
-                    treat_id = torch.argmax(treat_cond_i).item()
+                if self.save_predictions:
+                    treat_id = torch.argmax(treat_cond).item()
                     treat_name = TREAT_NAMES[self.treatments[treat_id]]
-                    self.plot(
-                        x0_i.cpu().numpy(),
-                        traj.cpu().numpy(),
-                        true.squeeze(0).cpu().numpy(),
-                        prefix,
-                        treat_name=treat_name,
-                        tag=f"cgfm_traj_treat_{treat_name}_{idx.item()}",
-                    )
-
+                    if culture[0] == 'PDOF':
+                        #print("Patient: ", patient, "Culture: ", culture, "Treatment: ", treat_name, "Source: ", x0.shape, "Target: ", x1.shape)
+                        self.data_save_source_target_pred[patient[0]]['source'].append(x0)
+                        self.data_save_source_target_pred[patient[0]]['target'].append(x1)
+                        self.data_save_source_target_pred[patient[0]]['pred'].append(pred)
+                        self.data_save_source_target_pred[patient[0]]['culture'].append(culture)
+                        self.data_save_source_target_pred[patient[0]]['treatment'].append(treat_name)
+    
+    def save_population_embeddings(self):
+        if self.save_predictions:
+            with open(f'cgfm_predictions_patients_pdo21.pkl', 'wb') as f:
+                pickle.dump(self.data_save_source_target_pred, f)
+                
+            print("\n Predictions saved.")
+    
+    
     def plot(self, source, traj, target, prefix, treat_name, tag):             
         # Flatten traj to [t*n, d]
         t, n, d = traj.shape
@@ -910,6 +1389,7 @@ class TrellisMFM(pl.LightningModule):
         num_treat_conditions=None,
         num_cell_conditions=None,
         base="source",
+        ot_sample=False,
         num_train_replica=861,
         num_test_replica=33,
         num_val_replica=33,
@@ -919,6 +1399,9 @@ class TrellisMFM(pl.LightningModule):
         pca=None,
         pca_space_eval=True,
         run_validation=True,
+        save_embeddings=False,
+        data_for_embed_save=None,
+        split=None,
         name="trellis_mfm",
         seed=0,
     ) -> None:
@@ -927,7 +1410,7 @@ class TrellisMFM(pl.LightningModule):
         # Important: This property controls manual optimization.
         self.automatic_optimization = False
 
-        self.save_hyperparameters(ignore=["train_eval_batches", "pca_for_plot"])
+        self.save_hyperparameters(ignore=["train_eval_batches", "pca_for_plot", "data_for_embed_save"])
 
         self.model = GlobalGNN(
             D=dim,
@@ -954,9 +1437,26 @@ class TrellisMFM(pl.LightningModule):
         self.integrate_time_steps = integrate_time_steps
         self.pca = pca
         self.pca_space_eval = pca_space_eval
+        self.ot_sample = ot_sample
         
         self.run_validation = run_validation
-                
+        
+        self.split = split
+        self.save_embeddings = save_embeddings
+        if self.save_embeddings:
+            self.data_for_embed_save = data_for_embed_save
+            #self.save_population_embeddings()
+            self.data_save_source_target_pred = {
+                'patient': [], 
+                'source': [], 
+                'target': [], 
+                'pred': [], 
+                'treatment': [], 
+                'culture': [], 
+                'cell_cond': [], 
+                'embed': [],
+            }
+
         assert base in [
             "source",
             "gaussian",
@@ -970,23 +1470,20 @@ class TrellisMFM(pl.LightningModule):
         # for training data eval
         if train_eval_batches is not None:
             self.train_eval_batches = train_eval_batches
-            self.use_pre_train_eval_batches = True
+            self.use_pre_train_eval_batches = True # flag for pre-defined population use for train-set evaluation 
         else:
             self.num_train_evals = 100
             self.train_evals_count = 0
             self.train_eval_batches = []
-            self.use_pre_train_eval_batches = False
-            
-        #self.num_train_evals = 100 #6
-        #self.train_evals_count = 0
-        #self.train_eval_batches = []
+            self.use_pre_train_eval_batches = False 
         
         self.embeddings = {}
         
         # for plotting
         self.pca_for_plot = pca_for_plot
         self.treatments = treatments
-        n_plot_idcs = min(num_test_replica, num_val_replica)
+        
+        n_plot_idcs = num_test_replica 
         interval_plot_idcs = int(n_plot_idcs / 5)
         self.idcs_for_plot = [i for i in range(1, n_plot_idcs, interval_plot_idcs)]
         
@@ -1026,26 +1523,6 @@ class TrellisMFM(pl.LightningModule):
 
         loss = loss.mean()
         return loss
-
-    def OLD_get_embeddings(self, idx, source_samples, cond=None):
-        if idx.shape[0] > 1: # using batched replicas
-            embedding_batch = []
-            for i in range(idx.shape[0]):
-                if idx[i].item() in self.embeddings:
-                    embedding_batch.append(self.embeddings[idx[i].item()].expand(source_samples.shape[1], -1))
-                else:
-                    embedding = self.model.embed_source(source_samples[i], cond=cond[i])
-                    self.embeddings[idx[i].item()] = embedding.detach()
-                    embedding_batch.append(embedding.expand(source_samples.shape[1], -1))
-            return torch.stack(embedding_batch)
-        else: # using sinlge replica
-            idx = idx.item()
-            if idx in self.embeddings:
-                return self.embeddings[idx]
-            else:
-                embedding = self.model.embed_source(source_samples, cond=cond)
-                self.embeddings[idx] = embedding.detach()
-                return embedding
             
     def get_embeddings(self, idx, source_samples, cond=None):
         if idx.shape[0] > 1:  # using batched replicas
@@ -1073,12 +1550,19 @@ class TrellisMFM(pl.LightningModule):
                 self.embeddings[idx] = embedding
                 return embedding
 
+    def sample_ot(self, x0, x1, cell_cond):
+        # TODO
+        pass
+
     def flow_step(self, batch):
-        idx, _, x0, x1, _, cell_cond, treat_cond = batch
-            
+        idx, _, x0, x1, _, cell_cond, treat_cond, _ = batch
+        
         embedding = self.get_embeddings(
             idx, x0.float().squeeze(), cell_cond.float().squeeze()
         )
+        
+        if self.ot_sample:
+            raise NotImplementedError("TODO: OT sampling not implemented for TrellisMFM. Future work.")
         
         loss = self.compute_loss(
             embedding.reshape(-1, embedding.shape[-1]),
@@ -1093,8 +1577,8 @@ class TrellisMFM(pl.LightningModule):
         return loss
     
     def gnn_step(self, batch):
-        idx, _, x0, x1, _, cell_cond, treat_cond = batch
-            
+        idx, _, x0, x1, _, cell_cond, treat_cond, _ = batch
+        
         embedding = self.model.embed_source(x0.float().squeeze(0), cond=cell_cond.float().squeeze(0))
         
         if len(embedding.shape) > 1:  # when using replica batching
@@ -1103,6 +1587,9 @@ class TrellisMFM(pl.LightningModule):
                 self.embeddings[idx[i].item()] = embedding[i].detach()
         else:
             self.embeddings[idx.item()] = embedding.detach()
+            
+        if self.ot_sample:
+            raise NotImplementedError("TODO: OT sampling not implemented for TrellisMFM. Future work.")
         
         loss = self.compute_loss(
             embedding.reshape(-1, embedding.shape[-1]),
@@ -1122,8 +1609,8 @@ class TrellisMFM(pl.LightningModule):
         else:
             loss = self.flow_step(batch)
         self.log("train/loss", loss, on_step=False, on_epoch=True)
-        
-        if self.use_pre_train_eval_batches is False:
+       
+        if self.use_pre_train_eval_batches is False: 
             if (
                 self.current_epoch % (self.trainer.check_val_every_n_epoch - 1)
             ) == 0 and self.train_evals_count < self.num_train_evals:
@@ -1133,7 +1620,7 @@ class TrellisMFM(pl.LightningModule):
 
     def training_epoch_end(self, outputs):
         if self.current_epoch == self.trainer.max_epochs - 1:
-            for batch in self.train_eval_batches:
+            for batch in tqdm(self.train_eval_batches):
                 self.eval_batch(batch, prefix="train")
 
             list_train_metrics = []
@@ -1199,7 +1686,7 @@ class TrellisMFM(pl.LightningModule):
             self.log(f"train/{key}-avg", value, on_step=False, on_epoch=True)
 
         self.train_metrics = {"PDO": [], "PDOF": [], "F": []}
-
+   
     def validation_step(self, batch, batch_idx):
         if self.run_validation:
             self.eval_batch(batch, prefix='val')
@@ -1234,28 +1721,31 @@ class TrellisMFM(pl.LightningModule):
         self.eval_batch(batch, prefix="test")
         
     def test_epoch_end(self, outputs):
-        list_test_metrics = []
-        for culture_key in list(self.test_metrics.keys()):
-            if not self.test_metrics[culture_key]:
-                continue
-            eval_metrics_mean_ood = {
-                k: np.mean([m[k] for m in self.test_metrics[culture_key]])
-                for k in self.test_metrics[culture_key][0]
-            }
-            for key, value in eval_metrics_mean_ood.items():
-                self.log(
-                    f"test/{key}-{culture_key}", value, on_step=False, on_epoch=True
-                )
-            list_test_metrics.append(eval_metrics_mean_ood)
+        if self.save_embeddings:
+            self.save_population_predictions()
+        else:
+            list_test_metrics = []
+            for culture_key in list(self.test_metrics.keys()):
+                if not self.test_metrics[culture_key]:
+                    continue
+                eval_metrics_mean_ood = {
+                    k: np.mean([m[k] for m in self.test_metrics[culture_key]])
+                    for k in self.test_metrics[culture_key][0]
+                }
+                for key, value in eval_metrics_mean_ood.items():
+                    self.log(
+                        f"test/{key}-{culture_key}", value, on_step=False, on_epoch=True
+                    )
+                list_test_metrics.append(eval_metrics_mean_ood)
 
-        avg_test_metrics = dict(pd.DataFrame(list_test_metrics).mean())
-        for key, value in avg_test_metrics.items():
-            self.log(f"test/{key}-avg", value, on_step=False, on_epoch=True)
-            
-        self.test_metrics = {"PDO": [], "PDOF": [], "F": []}
+            avg_test_metrics = dict(pd.DataFrame(list_test_metrics).mean())
+            for key, value in avg_test_metrics.items():
+                self.log(f"test/{key}-avg", value, on_step=False, on_epoch=True)
+                
+            self.test_metrics = {"PDO": [], "PDOF": [], "F": []}
 
     def eval_batch(self, batch, prefix):
-        idx, culture, x0, x1, x1_full, cell_cond, treat_cond = batch
+        idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient = batch
         
         node = NeuralODE(
             torch_wrapper_gnn_flow_cond(self.model),
@@ -1268,7 +1758,7 @@ class TrellisMFM(pl.LightningModule):
         time_span = torch.linspace(0, 1, self.integrate_time_steps)
         ts_for_plot = self.integrate_time_steps / 5
         ts = [i for i in range(int(ts_for_plot - 1), self.integrate_time_steps, int(ts_for_plot))]
-
+        
         with torch.no_grad():
             if len(x0.shape) > 3:
                 x0 = x0.squeeze(0)
@@ -1309,34 +1799,73 @@ class TrellisMFM(pl.LightningModule):
                     
                 true = x1_full.float() if self.pca is not None and self.dim == 43 else x1.float()
 
-                names, dd = compute_distribution_distances(
-                    pred.unsqueeze(1).to(true),
-                    true[0].unsqueeze(1),
-                )
-                
-                if prefix == 'train':
-                    self.train_metrics[culture[0]].append({**dict(zip(names, dd))})
-                elif prefix == 'val':
-                    self.val_metrics[culture[0]].append({**dict(zip(names, dd))})
-                elif prefix == 'test':
-                    self.test_metrics[culture[0]].append({**dict(zip(names, dd))})
+                if self.save_embeddings:
+                    self.get_population_predictions(batch, pred)
                 else:
-                    raise ValueError(f"unknown prefix: {prefix}")
-
-                # plot in 2d PCA space
-                if idx in self.idcs_for_plot and self.pca_for_plot is not None:
-                    print("Plotting 2D-PCA predictions ... \n")
-                    treat_id = torch.argmax(treat_cond_i).item()
-                    treat_name = TREAT_NAMES[self.treatments[treat_id]]
-                    self.plot(
-                        x0_i.cpu().numpy(),
-                        traj.cpu().numpy(),
-                        true.squeeze(0).cpu().numpy(),
-                        prefix,
-                        treat_name=treat_name,
-                        tag=f"mfm_traj_treat_{treat_name}_{self.knn_k}_{idx.item()}",
+                    names, dd = compute_distribution_distances(
+                        pred.unsqueeze(1).to(true),
+                        true[0].unsqueeze(1),
                     )
-
+                
+                    if prefix == 'train':
+                        self.train_metrics[culture[0]].append({**dict(zip(names, dd))})
+                    elif prefix == 'val':
+                        self.val_metrics[culture[0]].append({**dict(zip(names, dd))})
+                    elif prefix == 'test':
+                        self.test_metrics[culture[0]].append({**dict(zip(names, dd))})
+                    else:
+                        raise ValueError(f"unknown prefix: {prefix}")
+    
+    def get_population_predictions(self, batch, pred):
+        idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient = batch
+        
+        treat_id = torch.argmax(treat_cond).item()
+        treat_name = TREAT_NAMES[self.treatments[treat_id]]
+        
+        self.data_save_source_target_pred['patient'].append(patient)
+        self.data_save_source_target_pred['source'].append(x0)
+        self.data_save_source_target_pred['target'].append(x1)
+        self.data_save_source_target_pred['pred'].append(pred)
+        self.data_save_source_target_pred['culture'].append(culture)
+        self.data_save_source_target_pred['treatment'].append(treat_name)
+        self.data_save_source_target_pred['cell_cond'].append(cell_cond)
+        
+        self.model.update_embedding_for_inference(torch.tensor(x0).float().to(device='cuda'), cond=cell_cond.float().float().to(device='cuda'))
+        embeddings = self.model.embedding.detach()
+        
+        self.data_save_source_target_pred['embed'].append(embeddings)
+        #self.save_population_predictions()
+        
+        print("\nPatient: ", patient, "Culture: ", culture, "Treatment: ", treat_name, "cell-type: ", cell_cond.shape, "\nSource: ", x0.shape, "Target: ", x1.shape, "Prediction: ", pred.shape, "embedding: ", embeddings.shape)
+    
+    def save_population_predictions(self):
+        if self.save_embeddings:    
+            # Also save prediction dict
+            with open(f'mfm_predictions_and_embeds_patients_{self.split}.pkl', 'wb') as f:
+                pickle.dump(self.data_save_source_target_pred, f)
+                
+            print("\n Predictions and Population embeddings saved.")
+           
+    def save_population_embeddings(self):
+        if self.save_embeddings:
+            print("Saving population embeddings... \n")
+            for k, v in tqdm(self.data_for_embed_save.items()):    
+                for x, c in zip(v['source'], v['cell_cond']):
+                    self.model.update_embedding_for_inference(torch.tensor(x).float().to(device='cuda'), cond=torch.tensor(c).float().to(device='cuda'))
+                    embeddings = self.model.embedding.detach()
+                    self.data_for_embed_save[k]['embed'].append(embeddings)
+                    print(k, x.shape, c.shape, embeddings.shape)
+            
+            # save embeddings
+            with open(f'mfm_embeddings_patients_{self.split}.pkl', 'wb') as f:
+                pickle.dump(self.data_for_embed_save, f)
+            
+            # Also save prediction dict
+            with open(f'mfm_predictions_patients_{self.split}.pkl', 'wb') as f:
+                pickle.dump(self.data_save_source_target_pred, f)
+                
+            print("\n Population embeddings saved.")
+    
     def plot(self, source, traj, target, prefix, treat_name, tag):
         # Flatten traj to [t*n, d]
         t, n, d = traj.shape
