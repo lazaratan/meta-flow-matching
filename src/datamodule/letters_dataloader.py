@@ -7,6 +7,7 @@ import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image, ImageDraw, ImageFont
+from collections import defaultdict
 
 import sys
 from pathlib import Path
@@ -23,7 +24,9 @@ class letters_replica_batch_dataset(Dataset):
         source_noise_scale=0.5,
         num_rotations=10,
         ivp_batch_size=None,
+        num_train_letters=24,
         conditional=False,
+        save_embeddings=False,
         seed=0,
         mode="train",
     ) -> None:
@@ -32,7 +35,9 @@ class letters_replica_batch_dataset(Dataset):
         self.source_noise_scale = source_noise_scale
         self.num_rotations = num_rotations
         self.ivp_batch_size = ivp_batch_size
+        self.num_train_letters = num_train_letters
         self.conditional = conditional
+        self.save_embeddings = save_embeddings
         self.seed = seed
 
         if num_rotations == 10:
@@ -49,16 +54,34 @@ class letters_replica_batch_dataset(Dataset):
         ], "Invalid mode. Must be either 'train' or 'val' or 'test'" 
         self.mode = mode
         
-        self.alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        if self.num_train_letters == 24:
+            self.alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        # used for diversity ablation
+        elif self.num_train_letters == 16:
+            self.alphabet = "SQWHEFGAIJKLMNOP"
+            self.num_rotations = int((24 * self.num_rotations) / 16)
+        elif self.num_train_letters == 8:
+            self.alphabet = "SQWHEFGH"
+            self.num_rotations = int((24 * self.num_rotations) / 8)
+        elif self.num_train_letters == 4:
+            self.alphabet = "SQWH"
+            self.num_rotations = int((24 * self.num_rotations) / 4)
+        elif self.num_train_letters == 2:
+            self.alphabet = "SQ"
+            self.num_rotations = int((24 * self.num_rotations) / 2)
+        elif self.num_train_letters == 1:
+            self.alphabet = "S"
+            self.num_rotations = int((24 * self.num_rotations) / 1)
+        else:
+            raise ValueError("Invalid number of train letters specified.")
         
         if self.conditional:
-            #self.num_train_conditions = (len(self.alphabet) - 2) * self.num_rotations + 2
-            self.num_train_conditions = (len(self.alphabet) - 2) * self.num_rotations
+            self.num_train_conditions = (len(self.alphabet) - 2) * self.num_rotations if self.num_train_letters == 24 else len(self.alphabet) * self.num_rotations + 20
             self.num_val_conditions = 10 #self.num_rotations
             self.num_test_conditions = 10 #self.num_rotations
             self.num_conditions = self.num_train_conditions + self.num_val_conditions + self.num_test_conditions
         
-        self.samples = self.get_denoising_samples(mode, num_rotations=num_rotations, seed=seed)
+        self.samples = self.get_denoising_samples(mode, num_rotations=self.num_rotations, seed=seed)
         self.num_samples = len(self.samples)
         
         if mode == "train":
@@ -150,9 +173,10 @@ class letters_replica_batch_dataset(Dataset):
                             cond += 1
         elif mode == 'val':
             target = "X"
+            num_rotate_val = self.num_rotations if self.save_embeddings else 10
             if self.conditional:
                 cond = self.num_train_conditions
-            for i in range(10):  # range(num_rotations):
+            for i in range(num_rotate_val):  # range(num_rotations):
                 rotation = 2.0 * torch.pi * torch.rand(1)
                 target_samples = self.char_sampler(target, rotation=rotation.item())
                 source_samples = (
@@ -171,9 +195,10 @@ class letters_replica_batch_dataset(Dataset):
                     cond += 1
         elif mode == "test":
             target = "Y"
+            num_rotate_test = self.num_rotations if self.save_embeddings else 10
             if self.conditional:
                 cond = self.num_train_conditions + self.num_val_conditions
-            for i in range(10):  # range(num_rotations):
+            for i in range(num_rotate_test):  # range(num_rotations):
                 rotation = 2.0 * torch.pi * torch.rand(1)
                 target_samples = self.char_sampler(target, rotation=rotation.item())
                 source_samples = (
@@ -301,8 +326,10 @@ class LettersBatchDatamodule(pl.LightningDataModule):
         ivp_batch_size=None,
         noise_scale=0.05,
         source_noise_scale=0.5,
+        num_train_letters=24,
         num_rotations=10,
         conditional=False,
+        save_embeddings=False,
         seed=0,
         shuffle=None,
     ) -> None:
@@ -311,8 +338,10 @@ class LettersBatchDatamodule(pl.LightningDataModule):
         self.ivp_batch_size = ivp_batch_size
         self.noise_scale = noise_scale
         self.source_noise_scale = source_noise_scale
+        self.num_train_letters = num_train_letters
         self.num_rotations = num_rotations
         self.conditional = conditional
+        self.save_embeddings = save_embeddings
         self.seed = seed
         self.shuffle = shuffle
 
@@ -324,7 +353,9 @@ class LettersBatchDatamodule(pl.LightningDataModule):
             source_noise_scale=self.source_noise_scale,
             num_rotations=self.num_rotations,
             ivp_batch_size=self.ivp_batch_size,
+            num_train_letters=self.num_train_letters,
             conditional=self.conditional,
+            save_embeddings=self.save_embeddings,
             seed=self.seed,
         )
 
@@ -335,6 +366,7 @@ class LettersBatchDatamodule(pl.LightningDataModule):
             num_rotations=self.num_rotations,
             ivp_batch_size=self.ivp_batch_size,
             conditional=self.conditional,
+            save_embeddings=self.save_embeddings,
             seed=self.seed,
         )
 
@@ -345,8 +377,38 @@ class LettersBatchDatamodule(pl.LightningDataModule):
             num_rotations=self.num_rotations,
             ivp_batch_size=self.ivp_batch_size,
             conditional=self.conditional,
+            save_embeddings=self.save_embeddings,
             seed=self.seed,
         )
+
+        if save_embeddings: 
+            if self.num_rotations == 200:
+                alphabet_train = list("ABCDEFGHIJKLMNOPQRSTUVWZ")
+                alphabet_val = list("X")
+                alphabet_test = list("Y")
+                
+                print("letters:", alphabet_train)
+                print(len(self.train_dataset.samples))
+                
+                self.data_for_embed_save = defaultdict(lambda: {'source': [], 'embed': []})
+                
+                for i, (source, target) in enumerate(self.train_dataset.samples):
+                    if i % self.num_rotations == 0:
+                        s_idc = i // self.num_rotations         
+                    letter = alphabet_train[s_idc]
+                    self.data_for_embed_save[letter]['source'].append(source)
+                    
+                for i, (source, target) in enumerate(self.val_dataset.samples):
+                    if i % self.num_rotations == 0:
+                        s_idc = i // self.num_rotations  
+                    letter = alphabet_val[s_idc]
+                    self.data_for_embed_save[letter]['source'].append(source)
+                    
+                for i, (source, target) in enumerate(self.test_dataset.samples):
+                    if i % self.num_rotations == 0:
+                        s_idc = i // self.num_rotations
+                    letter = alphabet_test[s_idc]
+                    self.data_for_embed_save[letter]['source'].append(source)
 
     def train_dataloader(self):
         return DataLoader(

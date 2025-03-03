@@ -23,25 +23,26 @@ datamodule:
 
 model:
   name: fm_letters
-  lr: 1e-4 #1e-4
+  lr: 1e-4 
   dim: 2
   num_hidden: 512
   num_layers: 4
   skip_connections: False
   base: source
+  ot_sample: False
   integrate_time_steps: 500
 
 trainer:
-  max_epochs: 12000 #2000
-  min_epochs: 12000 #2000
-  check_val_every_n_epoch: 12000 #500
+  max_epochs: 12000 
+  min_epochs: 12000 
+  check_val_every_n_epoch: 1200 
   accelerator: gpu
   devices: 1
 
 checkpoint:
   filename: "chkpt"
 
-# NOTE: early stopping is NOT being used
+# NOTE: early stopping is not being used
 early_stopping:
   monitor: "val/2-Wasserstein" 
   mode: "min" 
