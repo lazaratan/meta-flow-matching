@@ -64,7 +64,7 @@ def compute_distances(pred, true):
     me = math.sqrt(mse)
     return mse, me, torch.nn.functional.l1_loss(pred, true).item()
 
-def compute_distribution_distances(pred, true):
+def compute_distribution_distances(pred, true, r2_pairwise_feat_corrs=True):
     """computes distances between distributions.
     pred: [batch, times, dims] tensor
     true: [batch, times, dims] tensor or list[batch[i], dims] of length times
@@ -108,7 +108,8 @@ def compute_distribution_distances(pred, true):
     mean_dists = compute_distances(torch.mean(a, dim=0), torch.mean(b, dim=0))
     median_dists = compute_distances(torch.median(a, dim=0)[0], torch.median(b, dim=0)[0])
     
-    r2_pairwise_feat_corrs = cellot_corr(a.cpu().numpy(), b.cpu().numpy())
+    if r2_pairwise_feat_corrs:
+        r2_pairwise_feat_corrs = cellot_corr(a.cpu().numpy(), b.cpu().numpy())
     
     if pred_is_jagged or is_jagged:
         dists.append((w1, w2, *mean_dists, *median_dists, r2_pairwise_feat_corrs))
