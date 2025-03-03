@@ -29,18 +29,19 @@ def test(cfg: DictConfig) -> None:
     Returns:
         None
     """
-
-    cfg.ckpt_path = cfg.ckpt_path + cfg.ckpt
+    
+    if cfg.model._target_ != "src.models.trellis_module.TrellisDummy":   
+        cfg.ckpt_path = cfg.ckpt_path + cfg.ckpt
+        
+        # Convert relative ckpt path to absolute path if necessary
+        if not os.path.isabs(cfg.ckpt_path):
+            cfg.ckpt_path = os.path.join(
+                hydra.utils.get_original_cwd(), cfg.ckpt_path
+            )
 
     # Set seed for random number generators in pytorch, numpy and python.random
     if cfg.get("seed"):
         seed_everything(cfg.seed, workers=True)
-
-    # Convert relative ckpt path to absolute path if necessary
-    if not os.path.isabs(cfg.ckpt_path):
-        cfg.ckpt_path = os.path.join(
-            hydra.utils.get_original_cwd(), cfg.ckpt_path
-        )
 
     # Init lightning datamodule
     log.info(f"Instantiating datamodule <{cfg.datamodule._target_}>")
@@ -59,10 +60,18 @@ def test(cfg: DictConfig) -> None:
                 num_conditions=datamodule.train_dataset.num_conditions,
             )
         else:
-            model = instantiate(
-                cfg.model,
-                datamodule.train_dataset.train_eval_letters,
-            )
+            if not datamodule.save_embeddings:
+                model = instantiate(
+                    cfg.model,
+                    datamodule.train_dataset.train_eval_letters,
+                )
+            else:
+                model = instantiate(
+                    cfg.model,
+                    datamodule.train_dataset.train_eval_letters,
+                    data_for_embed_save=datamodule.data_for_embed_save,
+                    save_embeddings=datamodule.save_embeddings,
+                )
             
         model_dict = model.state_dict()
         PATH = cfg.ckpt_path
@@ -88,24 +97,41 @@ def test(cfg: DictConfig) -> None:
                 treatments=datamodule.train_dataset.treatment,
             )
         else:
-            model = instantiate(
-                cfg.model,
-                datamodule.train_dataset.train_eval_replicas,
-                num_train_replica=datamodule.num_train_replica,
-                num_test_replica=datamodule.num_test_replica,
-                num_val_replica=datamodule.num_val_replica,
-                pca_for_plot=datamodule.pca_for_plot,
-                treatments=datamodule.train_dataset.treatment,
-            )
-
-        #model.load_from_checkpoint(cfg.ckpt_path)
-        
-        #model_dict = model.state_dict()
-        #PATH = cfg.ckpt_path
-        #checkpoint = torch.load(PATH)
-        #param_dict = {k: v for k, v in checkpoint["state_dict"].items() if k in model_dict}
-        #model_dict.update(param_dict)
-        #model.load_state_dict(model_dict)
+            if cfg.model._target_ == "src.models.trellis_module.TrellisDummy": 
+                model = instantiate(
+                    cfg.model,
+                    datamodule.train_dataset.train_eval_replicas,
+                    datamodule.train_dataset.train_populations_means,
+                    num_train_replica=datamodule.num_train_replica,
+                    num_test_replica=datamodule.num_test_replica,
+                    num_val_replica=datamodule.num_val_replica,
+                    pca_for_plot=datamodule.pca_for_plot,
+                    treatments=datamodule.train_dataset.treatment,
+                )
+            else: 
+                if cfg.model._target_ == "src.models.trellis_module.TrellisMFM":
+                    model = instantiate(
+                        cfg.model,
+                        datamodule.train_dataset.train_eval_replicas,
+                        num_train_replica=datamodule.num_train_replica,
+                        num_test_replica=datamodule.num_test_replica,
+                        num_val_replica=datamodule.num_val_replica,
+                        pca_for_plot=datamodule.pca_for_plot,
+                        treatments=datamodule.train_dataset.treatment,
+                        save_embeddings=datamodule.save_embeddings,
+                        data_for_embed_save=datamodule.data_for_embed_save,
+                        split=datamodule.split,
+                    )
+                else:
+                    model = instantiate(
+                        cfg.model,
+                        datamodule.train_dataset.train_eval_replicas,
+                        num_train_replica=datamodule.num_train_replica,
+                        num_test_replica=datamodule.num_test_replica,
+                        num_val_replica=datamodule.num_val_replica,
+                        pca_for_plot=datamodule.pca_for_plot,
+                        treatments=datamodule.train_dataset.treatment,
+                    )
         
     else:
         model = instantiate(cfg.model)
@@ -124,7 +150,7 @@ def test(cfg: DictConfig) -> None:
         == "src.datamodule.letters_dataloader.LettersBatchDatamodule"
     ):  
         assert datamodule.batch_size == 1, "Set datamodule.batch_size=1 for testing!"
-        assert datamodule.shuffle is False, "Set datamodule.shuffle=True for testing!"
+        assert datamodule.shuffle is False, "Set datamodule.shuffle=False for testing!"
         
         # prefix tag for saving
         fname = cfg.model.name
@@ -284,8 +310,6 @@ def test(cfg: DictConfig) -> None:
     elif cfg.datamodule._target_ == "src.datamodule.trellis_dataloader.TrellisDatamodule":
         
         ### Start prediction        
-        #log.info("Starting prediction on train!")
-        #trainer.predict(model, datamodule.train_dataloader())
     
         # Init lightning callbacks
         callbacks: List[Callback] = []
@@ -328,7 +352,7 @@ def test(cfg: DictConfig) -> None:
         log.info("Starting testing!")
         trainer.test(model=model, datamodule=datamodule)
         #trainer.test(model=model, datamodule=datamodule, ckpt_path=cfg.ckpt_path)
-
+        
         # Make sure everything closed properly
         log.info("Finalizing!")
         utils.finish(
