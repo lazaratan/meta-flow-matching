@@ -61,15 +61,29 @@ def train(cfg: DictConfig):
                 treatments=datamodule.train_dataset.treatment,
             )
         else:
-            model = instantiate(
-                cfg.model,
-                datamodule.train_dataset.train_eval_replicas,
-                num_train_replica=datamodule.num_train_replica,
-                num_test_replica=datamodule.num_test_replica,
-                num_val_replica=datamodule.num_val_replica,
-                pca_for_plot=datamodule.pca_for_plot,
-                treatments=datamodule.train_dataset.treatment,
-            )
+            if cfg.model._target_ == "src.models.trellis_module.TrellisMFM":
+                model = instantiate(
+                    cfg.model,
+                    datamodule.train_dataset.train_eval_replicas,
+                    num_train_replica=datamodule.num_train_replica,
+                    num_test_replica=datamodule.num_test_replica,
+                    num_val_replica=datamodule.num_val_replica,
+                    pca_for_plot=datamodule.pca_for_plot,
+                    treatments=datamodule.train_dataset.treatment,
+                    save_embeddings=datamodule.save_embeddings,
+                    data_for_embed_save=datamodule.data_for_embed_save,
+                    split=datamodule.split,
+                )
+            else:
+                model = instantiate(
+                    cfg.model,
+                    datamodule.train_dataset.train_eval_replicas,
+                    num_train_replica=datamodule.num_train_replica,
+                    num_test_replica=datamodule.num_test_replica,
+                    num_val_replica=datamodule.num_val_replica,
+                    pca_for_plot=datamodule.pca_for_plot,
+                    treatments=datamodule.train_dataset.treatment,
+                )
     else: 
         model = instantiate(cfg.model)
 
@@ -137,4 +151,3 @@ def train(cfg: DictConfig):
         callbacks=callbacks,
         logger=logger,
     )
-

@@ -2,11 +2,13 @@
 
 import os
 import numpy as np
+import ot as pot
 import torch
 import torch.optim as optim
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import pickle 
 import wandb
 
 from torchdyn.core import NeuralODE
@@ -29,6 +31,7 @@ class LettersFM(pl.LightningModule):
         num_layers=4,
         skip_connections=False,
         base="source",
+        ot_sample=False,
         integrate_time_steps=500,
         name="letters_fm",
     ) -> None:
@@ -50,6 +53,7 @@ class LettersFM(pl.LightningModule):
         self.dim = dim
         self.num_hidden = num_hidden
         self.integrate_time_steps = integrate_time_steps
+        self.ot_sample = ot_sample
 
         assert base in [
             "source",
@@ -96,9 +100,28 @@ class LettersFM(pl.LightningModule):
 
         loss = loss.mean()
         return loss
+    
+    def sample_ot(self, x0, x1):
+        # Resample x0, x1 according to transport matrix
+        batch_size = x0.shape[0]
+        a, b = pot.unif(x0.size()[0]), pot.unif(x1.size()[0])
+        M = torch.cdist(x0, x1) ** 2
+        pi = pot.emd(a, b, M.detach().cpu().numpy())
+        # Sample random interpolations on pi
+        p = pi.flatten()
+        p = p / p.sum()
+        choices = np.random.choice(pi.shape[0] * pi.shape[1], p=p, size=batch_size)
+        i, j = np.divmod(choices, pi.shape[1])
+        x0 = x0[i]
+        x1 = x1[j]
+        return x0, x1
 
     def training_step(self, batch, batch_idx):
         _, x0, x1 = batch
+        
+        if self.ot_sample:
+            for i in range(x0.shape[0]):
+                x0[i], x1[i] = self.sample_ot(x0[i], x1[i])
         
         assert (
             len(x0.shape) == 3
@@ -129,6 +152,7 @@ class LettersFM(pl.LightningModule):
                 names, dd = compute_distribution_distances(
                     pred_samples.squeeze(0).unsqueeze(1).to(target_samples),
                     target_samples.squeeze(0).unsqueeze(1),
+                    r2_pairwise_feat_corrs=False,
                 )
                 eval_metrics.append({**dict(zip(names, dd))})
             eval_metrics = {
@@ -202,6 +226,7 @@ class LettersFM(pl.LightningModule):
             names, dd = compute_distribution_distances(
                 pred_samples[i].unsqueeze(1).to(target_samples),
                 target_samples[i].unsqueeze(1),
+                r2_pairwise_feat_corrs=False,
             )
             metrics.append({**dict(zip(names, dd))})
         if aggregate:
@@ -240,6 +265,7 @@ class LettersFM(pl.LightningModule):
             trajs = torch.stack(trajs, dim=0)
             pred = torch.stack(pred, dim=0)
             true = x1
+            
         return trajs, pred, true
 
     def plot(
@@ -342,6 +368,7 @@ class LettersCGFM(pl.LightningModule):
         num_layers=4,
         skip_connections=False,
         base="source",
+        ot_sample=False,
         integrate_time_steps=500,
         num_conditions=262,
         name="letters_cgfm",
@@ -366,6 +393,7 @@ class LettersCGFM(pl.LightningModule):
         self.num_hidden = num_hidden
         self.integrate_time_steps = integrate_time_steps
         self.num_conditions = num_conditions
+        self.ot_sample = ot_sample
         
         assert base in [
             "source",
@@ -412,9 +440,29 @@ class LettersCGFM(pl.LightningModule):
 
         loss = loss.mean()
         return loss
+    
+    def sample_ot(self, x0, x1):
+        # Resample x0, x1 according to transport matrix
+        batch_size = x0.shape[0]
+        a, b = pot.unif(x0.size()[0]), pot.unif(x1.size()[0])
+        M = torch.cdist(x0, x1) ** 2
+        pi = pot.emd(a, b, M.detach().cpu().numpy())
+        # Sample random interpolations on pi
+        p = pi.flatten()
+        p = p / p.sum()
+        choices = np.random.choice(pi.shape[0] * pi.shape[1], p=p, size=batch_size)
+        i, j = np.divmod(choices, pi.shape[1])
+        x0 = x0[i]
+        x1 = x1[j]
+        return x0, x1
 
     def training_step(self, batch, batch_idx):
         _, x0, x1, cond = batch
+        
+        if self.ot_sample:
+            for i in range(x0.shape[0]):
+                x0[i], x1[i] = self.sample_ot(x0[i], x1[i])
+        
         assert (
             len(x0.shape) == 3
         ), "This was a temporary fix for the dataloader -- TODO: Make the code more gener."
@@ -446,6 +494,7 @@ class LettersCGFM(pl.LightningModule):
                 names, dd = compute_distribution_distances(
                     pred_samples.squeeze(0).unsqueeze(1).to(target_samples),
                     target_samples.squeeze(0).unsqueeze(1),
+                    r2_pairwise_feat_corrs=False,
                 )
                 eval_metrics.append({**dict(zip(names, dd))})
             eval_metrics = {
@@ -527,6 +576,7 @@ class LettersCGFM(pl.LightningModule):
             names, dd = compute_distribution_distances(
                 pred_samples[i].unsqueeze(1).to(target_samples),
                 target_samples[i].unsqueeze(1),
+                r2_pairwise_feat_corrs=False,
             )
             metrics.append({**dict(zip(names, dd))})
         if aggregate:
@@ -703,6 +753,9 @@ class LettersMFM(pl.LightningModule):
         knn_k=50,
         skip_connections=True,
         base="source",
+        ot_sample=False,
+        save_embeddings=False,
+        data_for_embed_save=None,
         integrate_time_steps=500,
         name="letters_mfm",
     ) -> None:
@@ -733,6 +786,12 @@ class LettersMFM(pl.LightningModule):
         self.knn_k = knn_k
         self.num_hidden = num_hidden
         self.integrate_time_steps = integrate_time_steps
+        self.ot_sample = ot_sample
+        
+        self.save_embeddings = save_embeddings
+        if self.save_embeddings:
+            self.data_for_embed_save = data_for_embed_save
+            self.save_population_embeddings()
         
         assert base in [
             "source",
@@ -806,9 +865,29 @@ class LettersMFM(pl.LightningModule):
                 embedding = self.model.embed_source(source_samples).detach()
                 self.embeddings[idx] = embedding
                 return embedding
+            
+    def sample_ot(self, x0, x1):
+        # Resample x0, x1 according to transport matrix
+        batch_size = x0.shape[0]
+        a, b = pot.unif(x0.size()[0]), pot.unif(x1.size()[0])
+        M = torch.cdist(x0, x1) ** 2
+        pi = pot.emd(a, b, M.detach().cpu().numpy())
+        # Sample random interpolations on pi
+        p = pi.flatten()
+        p = p / p.sum()
+        choices = np.random.choice(pi.shape[0] * pi.shape[1], p=p, size=batch_size)
+        i, j = np.divmod(choices, pi.shape[1])
+        x0 = x0[i]
+        x1 = x1[j]
+        return x0, x1
 
     def flow_step(self, batch):
         idx, x0, x1 = batch
+        
+        if self.ot_sample:
+            for i in range(x0.shape[0]):
+                x0[i], x1[i] = self.sample_ot(x0[i], x1[i])
+                
         embedding = self.get_embeddings(idx, x0)
         loss = self.compute_loss(
             embedding.reshape(-1, embedding.shape[-1]),
@@ -822,6 +901,11 @@ class LettersMFM(pl.LightningModule):
     
     def gnn_step(self, batch):
         idx, x0, x1 = batch
+        
+        if self.ot_sample:
+            for i in range(x0.shape[0]):
+                x0[i], x1[i] = self.sample_ot(x0[i], x1[i])
+                
         embedding = self.model.embed_source(x0)
 
         if len(embedding.shape) > 1:  # when using replica batching
@@ -872,6 +956,7 @@ class LettersMFM(pl.LightningModule):
                 names, dd = compute_distribution_distances(
                     pred_samples.unsqueeze(1).to(target_samples),
                     target_samples.unsqueeze(1),
+                    r2_pairwise_feat_corrs=False,
                 )
                 eval_metrics.append({**dict(zip(names, dd))})
             eval_metrics = {
@@ -944,6 +1029,7 @@ class LettersMFM(pl.LightningModule):
             names, dd = compute_distribution_distances(
                 pred_samples[i].unsqueeze(1).to(target_samples),
                 target_samples[i].unsqueeze(1),
+                r2_pairwise_feat_corrs=False,
             )
             metrics.append({**dict(zip(names, dd))})
         if aggregate:
@@ -1142,3 +1228,18 @@ class LettersMFM(pl.LightningModule):
         os.makedirs(os.path.dirname(gif_path), exist_ok=True)
         ani.save(gif_path, writer='imagemagick', fps=60)  # High fps for smoother animation
         plt.close(fig)
+        
+    def save_population_embeddings(self):
+        print("Saving population embeddings...")
+        for k, v in self.data_for_embed_save.items():    
+            for x in v['source']:
+                self.model.update_embedding_for_inference(x.to(device='cuda'))
+                embeddings = self.model.embedding.detach()
+                self.data_for_embed_save[k]['embed'].append(embeddings)
+                print(k, x.shape, embeddings.shape)
+        
+        with open('embeddings_letters_200.pkl', 'wb') as f:
+            pickle.dump(self.data_for_embed_save, f)
+            
+        print("Population embeddings saved.")
+        exit()

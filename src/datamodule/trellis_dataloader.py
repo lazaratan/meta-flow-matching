@@ -11,6 +11,7 @@ import yaml as yml
 import numpy as np
 import torch
 from sklearn.decomposition import PCA
+from collections import defaultdict
 
 
 class trellis_dataset(Dataset):
@@ -27,6 +28,7 @@ class trellis_dataset(Dataset):
         culture=["PDO", "PDOF", "F"],
         cell_type=["PDOs", "Fibs"],
         prefix="train",
+        split_name='pdo21',
         pca=None,
         seed=0,
     ):
@@ -45,6 +47,7 @@ class trellis_dataset(Dataset):
         self.num_components = num_components
         self.use_small_exp_num = use_small_exp_num
         self.prefix = prefix
+        self.split_name = split_name
 
         self.split = self.__filter_control__(split)
         self.exp_idx = self.__lst_exp__(self.split)
@@ -70,10 +73,11 @@ class trellis_dataset(Dataset):
             else:
                 self.idcs_train_eval = [i for i in range(len(self.samples))]
             
+            self.train_populations_means = [] # for mean shift comparison
             self.train_eval_replicas = []
             for i in self.idcs_train_eval:
                 if self.pca is not None:
-                    culture, x0, x1, _, x1_full, cell_cond, treat_cond = self.samples[i]
+                    culture, x0, x1, _, x1_full, cell_cond, treat_cond, patient = self.samples[i]
                     replica = [
                         torch.tensor(i),
                         (culture,),
@@ -82,10 +86,11 @@ class trellis_dataset(Dataset):
                         torch.tensor(x1_full[None, ...]),
                         torch.tensor(cell_cond[None, ...]),
                         torch.tensor(treat_cond[None, ...]),
+                        (patient,),
                     ]
                     self.train_eval_replicas.append(self.get_eval_cells(replica, eval=True))
                 else: 
-                    culture, x0, x1, cell_cond, treat_cond = self.samples[i]
+                    culture, x0, x1, cell_cond, treat_cond, patient = self.samples[i]
                     replica = [
                         torch.tensor(i),
                         (culture,),
@@ -94,17 +99,26 @@ class trellis_dataset(Dataset):
                         None,
                         torch.tensor(cell_cond[None, ...]),
                         torch.tensor(treat_cond[None, ...]),
+                        (patient,),
                     ]
-                    self.train_eval_replicas.append(self.get_eval_cells(replica, eval=True))            
+                    self.train_eval_replicas.append(self.get_eval_cells(replica, eval=True))        
+            
+            # get population means for mean shift comparison (can comment out)
+            for i in range(len(self.samples)):
+                _, _, x1, _, _, _ = self.samples[i]
+                population_mean = np.mean(x1, axis=0)
+                self.train_populations_means.append(torch.tensor(population_mean))
+                    
         elif prefix == "val" or prefix == "test":
             self.eval_mode = True
+            
         else:
             raise ValueError("prefix not recognized")
 
         print("... Data loaded!")
 
     def construct_data(self):
-        self.samples_tmp, self.culture, self.x0, self.x1, self.cell_cond, self.treat_cond = self.select_experiments()
+        self.samples_tmp, self.culture, self.x0, self.x1, self.cell_cond, self.treat_cond, self.patients = self.select_experiments()
         
         if self.prefix == "train":
             if self.num_components is None:
@@ -137,7 +151,7 @@ class trellis_dataset(Dataset):
                 print("Fitting PCA for 2D plotting ...")
                 xs = []
                 for sample in self.samples:
-                    _, x0, x1, _, _ = sample
+                    _, x0, x1, _, _, _ = sample
                     xs.append(np.concatenate([x0, x1], axis=0))
                 xs = np.concatenate(xs, axis=0)
                 print(xs.shape)
@@ -174,13 +188,27 @@ class trellis_dataset(Dataset):
             raise ValueError("prefix not recognized")
 
     def select_experiments(self):
-        samples_tmp, cultures, sources, targets, cell_conds, treat_conds = [], [], [], [], [], []
+        samples_tmp, cultures, sources, targets, cell_conds, treat_conds, patients = [], [], [], [], [], [], []
         
         for i in range(len(self.split)):
-            exp = self.split[i]
-
+            #exp = self.split[i]
+            
+            if self.split_name == "replicas-1" or self.split_name == "replicas-2":
+                exp = self.split[i]
+                pdo_num = -1 # no pdo number meta data in these splits
+            
+            else:
+                exp_patient = self.split[i]
+                
+                pdo_num = exp_patient.keys()
+                assert len(pdo_num) == 1, "More than one pdo number!"
+            
+                pdo_num = list(pdo_num)[0]
+                exp = exp_patient[pdo_num]
+            
             x0_treatment = list(set(exp.keys()).intersection(self.control))[0]
             treatkeys = [key for key in exp.keys() if key not in self.control]
+
             for t in treatkeys:
                 concentration = list(exp[t].keys())
                 max_conc = str(max(map(int, concentration)))
@@ -226,9 +254,11 @@ class trellis_dataset(Dataset):
                             x1,
                             cond_cell,
                             cond_treat,
+                            str(pdo_num),
                         )
                     )
-                    
+
+                    patients.append(str(pdo_num))
                     cultures.append(culture)
                     targets.append(x1)
                     cell_conds.append(cond_cell)
@@ -237,12 +267,12 @@ class trellis_dataset(Dataset):
 
         self.num_samples = len(samples_tmp)
         print("{} {} data samples".format(self.num_samples, self.prefix))
-        return samples_tmp, cultures, sources, targets, cell_conds, treat_conds
+        return samples_tmp, cultures, sources, targets, cell_conds, treat_conds, patients
 
     def pca_embed_samples(self, samples_tmp):
         samples = []
         for sample in samples_tmp:
-            culture, x0, x1, cell_cond, treat_cond = sample
+            culture, x0, x1, cell_cond, treat_cond, patient = sample
             x0_pca = self.pca.transform(x0)
             x1_pca = self.pca.transform(x1)
             
@@ -255,6 +285,7 @@ class trellis_dataset(Dataset):
                     x1,
                     cell_cond,
                     treat_cond,
+                    patient,
                 )
             )
             
@@ -301,7 +332,7 @@ class trellis_dataset(Dataset):
     
     def get_eval_cells(self, batch, eval=False):
         # cell batching for evaluation
-        idx, culture, x0, x1, x1_full, cell_cond, treat_cond = batch
+        idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient = batch
 
         if len(x0.shape) < 3:
             x0 = x0[None, ...]
@@ -320,9 +351,10 @@ class trellis_dataset(Dataset):
                     x1_full[:, :5000, :] if x1.shape[1] > 5000 and self.pca is not None else x1_full,
                     cell_cond[:, :5000, :] if x0.shape[1] > 5000 else cell_cond,
                     treat_cond[:, :5000, :] if x0.shape[1] > 5000 else treat_cond,
+                    patient,
                 )
             else:
-                return idx, culture, x0, x1, x1_full, cell_cond, treat_cond
+                return idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient
     
     def unpack_batch(self, batch):
         # cell batching for evaluation
@@ -330,7 +362,7 @@ class trellis_dataset(Dataset):
         if self.eval_mode:
             batch = self.get_eval_cells(batch, eval=self.eval_mode)
             
-        idx, culture, x0, x1, x1_full, cell_cond, treat_cond = batch
+        idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient = batch
         
         # cell batching for training
         if self.ivp_batch_size is not None:
@@ -345,16 +377,16 @@ class trellis_dataset(Dataset):
             x1_full = x1_full[x1_ivp_idcs, :] if self.pca is not None else None
             cell_cond = cell_cond[x0_ivp_idcs, :]
             treat_cond = treat_cond[x0_ivp_idcs, :]
-            return idx, culture, x0, x1, x1_full, cell_cond, treat_cond
+            return idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient
         else:
             x1_full = x1_full if self.pca is not None else None
-            return idx, culture, x0, x1, x1_full, cell_cond, treat_cond
+            return idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient
 
     def __getitem__(self, idx):
         if self.pca is not None:
-            culture, x0, x1, _, x1_full, cell_cond, treat_cond = self.samples[idx]
-            replica = [idx, culture, x0, x1, x1_full, cell_cond, treat_cond]
-            idx, culture, x0, x1, x1_full, cell_cond, treat_cond = self.unpack_batch(replica)
+            culture, x0, x1, _, x1_full, cell_cond, treat_cond, patient = self.samples[idx]
+            replica = [idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient]
+            idx, culture, x0, x1, x1_full, cell_cond, treat_cond, patient = self.unpack_batch(replica)
             return (
                 idx,
                 culture,
@@ -363,11 +395,12 @@ class trellis_dataset(Dataset):
                 x1_full,
                 cell_cond,
                 treat_cond,
+                patient,
             )
         else:
-            culture, x0, x1, cell_cond, treat_cond = self.samples[idx]
-            replica = [idx, culture, x0, x1, None, cell_cond, treat_cond]
-            idx, culture, x0, x1, _, cell_cond, treat_cond = self.unpack_batch(replica)
+            culture, x0, x1, cell_cond, treat_cond, patient = self.samples[idx]
+            replica = [idx, culture, x0, x1, None, cell_cond, treat_cond, patient]
+            idx, culture, x0, x1, _, cell_cond, treat_cond, patient = self.unpack_batch(replica)
             return (
                 idx,
                 culture,
@@ -376,13 +409,14 @@ class trellis_dataset(Dataset):
                 torch.tensor(0), # dummy tensor for x1_full (since x1 = x1_full in this case)
                 cell_cond,
                 treat_cond,
+                patient,
             )
 
 
 def custom_collate_fn(batch):
     """Custom collate function to handle variable length tensors and condition data."""
     # Extract fields from the batch
-    idxs, cultures, x0s, x1s, x1_fulls, cell_conds, treat_conds = zip(*batch)
+    idxs, cultures, x0s, x1s, x1_fulls, cell_conds, treat_conds, patients = zip(*batch)
 
     # Determine the actual shapes of x0 and x1
     def resolve_shape(tensor):
@@ -453,9 +487,9 @@ def custom_collate_fn(batch):
     idxs = torch.tensor(idxs)
 
     if needs_padding_x0 or needs_padding_x1:
-        return idxs, cultures, x0_batch, x1_batch, x1_full_batch, cell_conds_batch, treat_conds_batch, zero_pad_idx_x0, zero_pad_idx_x1
+        return idxs, cultures, x0_batch, x1_batch, x1_full_batch, cell_conds_batch, treat_conds_batch, zero_pad_idx_x0, zero_pad_idx_x1, patient
     else:
-        return idxs, cultures, x0_batch, x1_batch, x1_full_batch, cell_conds_batch, treat_conds_batch
+        return idxs, cultures, x0_batch, x1_batch, x1_full_batch, cell_conds_batch, treat_conds_batch, patients
 
 
 class TrellisDatamodule(pl.LightningDataModule):
@@ -465,34 +499,51 @@ class TrellisDatamodule(pl.LightningDataModule):
         ivp_batch_size=1024,
         split="patients",  # ["patients", "replicas"]
         plot_pca=False,
-        marker_cols="src/conf/datamodule/trellis_marker_col.yaml",
+        marker_cols="/h/lazar/scCFM/src/conf/datamodule/trellis_marker_col.yaml",
+        # data_path="trellis_patients_normalized.npy",  # trellis_pdo_fib_normalized_v3.npy
         control=set(["DMSO", "AH", "H2O"]),
         treatment=["O", "S", "VS", "L", "V", "F", "C", "SF", "CS", "CF", "CSF"],
         culture=["PDO", "PDOF", "F"],
         cell_type=["PDOs", "Fibs"],
-        name="trellis_replicates",
+        name="trellis",
         num_components=None,
         use_small_exp_num=False,
+        save_embeddings=False,
         seed=0,
     ):
         super().__init__()
         
         self.batch_size = batch_size
         self.ivp_batch_size = ivp_batch_size
+        self.save_embeddings = save_embeddings
+        self.split = split
         
-        assert split in ["patients", "replicas"], "split must be either 'patients' or 'replicas'"
-        if split == "patients":
+        assert split in ["replicas-1", "replicas-2", "pdo21", "pdo27", "pdo75"], "split not recognized"
+        if split == "replicas-1":
             self.split_source = (
-                "data_splits_patients.pickle"
+                "data/data_splits_replicas_1.pickle"
             )
-            data_path = "trellis_patients_normalized.npy"
-        elif split == "replicas":
+            data_path = "data/trellis_replicas_1_normalized.npy"
+        elif split == "replicas-2":
             self.split_source = (
-                "data_splits_replicas.pickle"
+                "data/data_splits_replicas_2.pickle"
             )
-            data_path = (
-                "trellis_replicas_normalized.npy"
+            data_path = "data/trellis_replicas_2_normalized.npy"
+        elif split == "pdo21":
+            self.split_source = (
+                "data//split_patient_test_pdo21.pickle"
             )
+            data_path = "data/trellis_patients_pdo21_normalized.npy"
+        elif split == "pdo27":
+            self.split_source = (
+                "data//split_patient_test_pdo27.pickle"
+            )
+            data_path = "data/trellis_patients_pdo27_normalized.npy"
+        elif split == "pdo75":
+            self.split_source = (
+                "data/split_patient_test_pdo75.pickle"
+            )
+            data_path = "data/trellis_patients_pdo75_normalized.npy"
         else:
             raise ValueError("split not recognized")
         
@@ -541,25 +592,32 @@ class TrellisDatamodule(pl.LightningDataModule):
             culture=self.culture,
             cell_type=self.cell_type,
             prefix="train",
+            split_name=self.split,
             seed=self.seed,
         )
         self.num_train_replica = self.train_dataset.num_samples
         self.pca_for_plot = self.train_dataset.pca_for_plot if plot_pca else None
-        
-        self.val_dataset = trellis_dataset(
-            split=self.data_splits["val"],
-            data=self.data,
-            num_components=self.num_components,
-            use_small_exp_num=self.use_small_exp_num,
-            control=self.control,
-            treatment=self.treatment,
-            culture=self.culture,
-            cell_type=self.cell_type,  
-            prefix="val",
-            pca=self.train_dataset.pca if self.num_components is not None else None,
-            seed=self.seed,
-        )
-        self.num_val_replica = self.val_dataset.num_samples
+
+        if "val" not in list(self.data_splits.keys()):
+            print("No validation set in this split")
+            self.val_dataset = []
+            self.num_val_replica = 0
+        else:
+            self.val_dataset = trellis_dataset(
+                split=self.data_splits["val"],
+                data=self.data,
+                num_components=self.num_components,
+                use_small_exp_num=self.use_small_exp_num,
+                control=self.control,
+                treatment=self.treatment,
+                culture=self.culture,
+                cell_type=self.cell_type,  
+                prefix="val",
+                split_name=self.split,
+                pca=self.train_dataset.pca if self.num_components is not None else None,
+                seed=self.seed,
+            )
+            self.num_val_replica = self.val_dataset.num_samples
 
         self.test_dataset = trellis_dataset(
             split=self.data_splits["test"],
@@ -571,12 +629,53 @@ class TrellisDatamodule(pl.LightningDataModule):
             culture=self.culture,
             cell_type=self.cell_type,  
             prefix="test",
+            split_name=self.split,
             pca=self.train_dataset.pca if self.num_components is not None else None,
             seed=self.seed,
         )
         self.num_test_replica = self.test_dataset.num_samples
-
+        
         print("DataModule initialized")
+        
+        if save_embeddings: 
+            #self.data_for_embed_save = defaultdict(lambda: 
+            #    {'source': [], 'cell_cond': [], 'culture': [], 'embed': []},
+            #    )
+            self.data_for_embed_save = defaultdict(lambda: 
+                    {
+                    'source': [], 
+                    'cell_cond': [], 
+                    'culture': [], 
+                    'treatment': [],
+                    'target': [],
+                    'predicted': [],
+                    'embed': []
+                    },
+                )
+            
+            for i, (culture, x0, x1, cell_cond, treat_cond, patient) in enumerate(self.train_dataset.samples):
+                #print('TRAIN', culture, x0.shape, x1.shape, cell_cond.shape, treat_cond.shape, patient)
+                if x0.shape[0] > 5000 or x1.shape[0] > 5000:
+                    num_source_cells = x0.shape[0]
+                    x0 = x0[:5000] if num_source_cells > 5000 else x0
+                    cell_cond = cell_cond[:5000] if num_source_cells > 5000 else cell_cond
+                    treat_cond = treat_cond[:5000] if num_source_cells > 5000 else treat_cond
+                self.data_for_embed_save[patient]['source'].append(x0)
+                self.data_for_embed_save[patient]['cell_cond'].append(cell_cond)
+                self.data_for_embed_save[patient]['culture'].append(culture)
+                
+            for i, (culture, x0, x1, cell_cond, treat_cond, patient) in enumerate(self.test_dataset.samples):
+                #print('TEST', culture, x0.shape, x1.shape, cell_cond.shape, treat_cond.shape, patient)
+                if x0.shape[0] > 5000 or x1.shape[0] > 5000:
+                    num_source_cells = x0.shape[0]
+                    x0 = x0[:5000] if num_source_cells > 5000 else x0
+                    cell_cond = cell_cond[:5000] if num_source_cells > 5000 else cell_cond
+                    treat_cond = treat_cond[:5000] if num_source_cells > 5000 else treat_cond
+                self.data_for_embed_save[patient]['source'].append(x0)
+                self.data_for_embed_save[patient]['cell_cond'].append(cell_cond)
+                self.data_for_embed_save[patient]['culture'].append(culture)
+        else:
+            self.data_for_embed_save = None
 
     def train_dataloader(self):
         return DataLoader(
