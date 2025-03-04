@@ -38,8 +38,7 @@ The raw data can be downloaded here: [Raw organoid data](https://data.mendeley.c
 
 <div align="left">
   
-If you find this code useful in your research, please cite the following paper (expand for BibTeX):
-
+If you find this code useful in your research, please cite our work.
 
 <summary>
 L. Atanackovic*, X. Zhang*, B. Amos, M. Blanchette, L.J. Lee, Y. Bengio, A. Tong, K. Neklyudov. "Meta Flow Matching: Integrating Vector Fields on the Wasserstein Manifold." <em>International Conference on Learning Representations (ICLR)</em>, 2025.
