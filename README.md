@@ -32,18 +32,17 @@ In MFM, we jointly train a vector field model $v_t(\cdot | \varphi(p_0; \theta);
 
 This repo contains all elements needed to reproduce our results. See [this http link](https://arxiv.org/abs/2408.14608) for the paper.
 
-The preprocessed data can be downloaded here: [Preprocessed organoid data](https://huggingface.co/datasets/lazaratan/meta-flow-matching-organoid-data-preprocessed)
+The preprocessed data can be downloaded here: [Preprocessed organoid data](https://huggingface.co/datasets/lazaratan/meta-flow-matching-organoid-data-preprocessed/blob/main/organoid_data_preprocessed.zip)
 
-The raw data can be downloaded here: [Raw organoid data](https://data.mendeley.com/datasets/hc8gxwks3p/1). For usability, we provide the notebook [trellis_data.ipynb](notebooks/trellis_data.ipynb) which contains further dataset details and code for the data preprocessing.
+The raw data can be downloaded here: [Raw organoid data](https://data.mendeley.com/datasets/hc8gxwks3p/1). For usability, we provide the notebooks [trellis_data_replica_splits.ipynb](notebooks/trellis_data_replica_splits.ipynb) and [trellis_data_3_pdo_splits.ipynb](notebooks/trellis_data_3_pdo_splits.ipynb) which contain further dataset details, code for the data preprocessing, and code for generating the replica and patient splits.
 
 <div align="left">
   
 If you find this code useful in your research, please cite the following paper (expand for BibTeX):
 
 
-<details>
 <summary>
-L. Atanackovic*, X. Zhang*, B. Amos, M. Blanchette, L.J. Lee, Y. Bengio, A. Tong, K. Neklyudov. Meta Flow Matching: Integrating Vector Fields on the Wasserstein Manifold, 2024.
+L. Atanackovic*, X. Zhang*, B. Amos, M. Blanchette, L.J. Lee, Y. Bengio, A. Tong, K. Neklyudov. "Meta Flow Matching: Integrating Vector Fields on the Wasserstein Manifold." <em>International Conference on Learning Representations (ICLR)</em>, 2025.
 </summary>
 
 ```bibtex
@@ -56,7 +55,6 @@ L. Atanackovic*, X. Zhang*, B. Amos, M. Blanchette, L.J. Lee, Y. Bengio, A. Tong
 }
 ```
 
-</details>
 
 ## How to run
 
